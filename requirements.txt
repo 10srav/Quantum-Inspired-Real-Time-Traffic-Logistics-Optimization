@@ -61,11 +61,10 @@ pytest-asyncio>=0.21.0,<1.0.0
 httpx>=0.24.0,<1.0.0
 
 # =========================
-# Frontend (Optional)
+# Frontend: React Dashboard (see quantum-traffic-ui/)
 # =========================
 
-streamlit>=1.30.0,<2.0.0
-streamlit-folium>=0.15.0,<1.0.0
+# Streamlit removed - migrated to React + TypeScript
 
 # =========================
 # Development Tools (Optional)
