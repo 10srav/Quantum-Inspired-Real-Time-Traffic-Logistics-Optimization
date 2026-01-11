@@ -1,0 +1,84 @@
+# =============================================================================
+# Prometheus Alerting Rules for Quantum Traffic Optimizer
+# =============================================================================
+
+groups:
+  - name: quantum-traffic-alerts
+    rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="quantum-traffic-api",status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="quantum-traffic-api"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # High Latency
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="quantum-traffic-api"}[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile latency is {{ $value | humanizeDuration }}"
+
+      # Service Down
+      - alert: ServiceDown
+        expr: up{job="quantum-traffic-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Quantum Traffic API is down"
+          description: "The API service has been unreachable for more than 1 minute"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="quantum-traffic-api"} > 1073741824
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize1024 }}"
+
+      # Slow Optimization
+      - alert: SlowOptimization
+        expr: |
+          histogram_quantile(0.95, sum(rate(optimization_duration_seconds_bucket[5m])) by (le)) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Optimization taking too long"
+          description: "95th percentile optimization time is {{ $value | humanizeDuration }}"
+
+      # High Rate Limit Hits
+      - alert: HighRateLimitHits
+        expr: sum(rate(rate_limit_hits_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate limit hits"
+          description: "Rate limit is being hit frequently ({{ $value }} hits/sec)"
+
+      # Low Cache Hit Rate
+      - alert: LowCacheHitRate
+        expr: |
+          sum(rate(cache_hits_total[5m]))
+          /
+          (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m]))) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}"

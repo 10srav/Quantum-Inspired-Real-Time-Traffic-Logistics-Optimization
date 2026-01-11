@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum Traffic Optimizer - Route Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            margin-bottom: 20px;
+            border-radius: 10px;
+        }
+        
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+        
+        header p {
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+        }
+        
+        #map {
+            height: 600px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .sidebar {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .sidebar h2 {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+        
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 5px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 1rem;
+        }
+        
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .delivery-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+        }
+        
+        .delivery-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+        
+        .delivery-item .remove {
+            cursor: pointer;
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+        
+        .results {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        
+        .status.success {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+        }
+        
+        .status.error {
+            background: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+        }
+        
+        .status.loading {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        
+        @media (max-width: 900px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            #map {
+                height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Quantum Traffic Optimizer</h1>
+            <p>QUBO/QAOA-based route optimization for Vijayawada</p>
+        </header>
+        
+        <div class="main-content">
+            <div id="map"></div>
+            
+            <div class="sidebar">
+                <h2>📍 Current Location</h2>
+                <div class="form-group">
+                    <label>Latitude</label>
+                    <input type="number" id="depot-lat" value="16.5063" step="0.001" min="16.5" max="16.7">
+                </div>
+                <div class="form-group">
+                    <label>Longitude</label>
+                    <input type="number" id="depot-lng" value="80.6480" step="0.001" min="80.6" max="80.7">
+                </div>
+                
+                <h2>➕ Add Delivery</h2>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="delivery-name" placeholder="Delivery name">
+                </div>
+                <div class="form-group">
+                    <label>Latitude</label>
+                    <input type="number" id="delivery-lat" value="16.52" step="0.005" min="16.5" max="16.7">
+                </div>
+                <div class="form-group">
+                    <label>Longitude</label>
+                    <input type="number" id="delivery-lng" value="80.65" step="0.005" min="80.6" max="80.7">
+                </div>
+                <div class="form-group">
+                    <label>Priority (1-10)</label>
+                    <input type="number" id="delivery-priority" value="5" step="0.5" min="1" max="10">
+                </div>
+                <button class="btn btn-secondary" onclick="addDelivery()">Add Delivery</button>
+                <button class="btn btn-secondary" onclick="addSampleDeliveries()">Add Samples</button>
+                
+                <h2>📦 Deliveries</h2>
+                <div class="delivery-list" id="delivery-list"></div>
+                
+                <h2>🚦 Traffic Level</h2>
+                <div class="form-group">
+                    <select id="traffic-level">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                
+                <button class="btn btn-primary" onclick="optimizeRoute()">🚀 Optimize Route</button>
+                <button class="btn btn-secondary" onclick="clearAll()">🗑️ Clear All</button>
+                
+                <div id="status"></div>
+                
+                <div class="results" id="results" style="display: none;">
+                    <h2>📊 Results</h2>
+                    <div class="metric">
+                        <span>Total Distance</span>
+                        <span class="metric-value" id="result-distance">-</span>
+                    </div>
+                    <div class="metric">
+                        <span>Total ETA</span>
+                        <span class="metric-value" id="result-eta">-</span>
+                    </div>
+                    <div class="metric">
+                        <span>Improvement</span>
+                        <span class="metric-value" id="result-improvement">-</span>
+                    </div>
+                    <div class="metric">
+                        <span>Compute Time</span>
+                        <span class="metric-value" id="result-time">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Configuration
+        const API_URL = 'http://localhost:8000';
+        const VIJAYAWADA_CENTER = [16.5063, 80.6480];
+        
+        // State
+        let deliveries = [];
+        let depotMarker = null;
+        let deliveryMarkers = [];
+        let routeLine = null;
+        
+        // Initialize map
+        const map = L.map('map').setView(VIJAYAWADA_CENTER, 13);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        // Add bounding box
+        L.rectangle([
+            [16.5, 80.6],
+            [16.7, 80.7]
+        ], {
+            color: '#667eea',
+            weight: 2,
+            fill: false,
+            dashArray: '5, 5'
+        }).addTo(map);
+        
+        // Initialize depot marker
+        updateDepotMarker();
+        
+        function updateDepotMarker() {
+            const lat = parseFloat(document.getElementById('depot-lat').value);
+            const lng = parseFloat(document.getElementById('depot-lng').value);
+            
+            if (depotMarker) {
+                map.removeLayer(depotMarker);
+            }
+            
+            depotMarker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                    className: 'depot-marker',
+                    html: '<div style="background: #dc3545; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold;">📍 Depot</div>',
+                    iconSize: [80, 30]
+                })
+            }).addTo(map);
+        }
+        
+        function addDelivery() {
+            const name = document.getElementById('delivery-name').value || `Delivery ${deliveries.length + 1}`;
+            const lat = parseFloat(document.getElementById('delivery-lat').value);
+            const lng = parseFloat(document.getElementById('delivery-lng').value);
+            const priority = parseFloat(document.getElementById('delivery-priority').value);
+            
+            const delivery = { name, lat, lng, priority };
+            deliveries.push(delivery);
+            
+            updateDeliveryMarkers();
+            updateDeliveryList();
+            
+            // Clear inputs
+            document.getElementById('delivery-name').value = '';
+        }
+        
+        function addSampleDeliveries() {
+            const samples = [
+                { name: 'Delivery A', lat: 16.5175, lng: 80.6198, priority: 2.0 },
+                { name: 'Delivery B', lat: 16.5412, lng: 80.6352, priority: 1.0 },
+                { name: 'Delivery C', lat: 16.5628, lng: 80.6521, priority: 3.0 },
+                { name: 'Delivery D', lat: 16.5890, lng: 80.6705, priority: 1.5 }
+            ];
+            
+            samples.forEach(s => {
+                if (!deliveries.find(d => d.lat === s.lat && d.lng === s.lng)) {
+                    deliveries.push(s);
+                }
+            });
+            
+            updateDeliveryMarkers();
+            updateDeliveryList();
+        }
+        
+        function removeDelivery(index) {
+            deliveries.splice(index, 1);
+            updateDeliveryMarkers();
+            updateDeliveryList();
+        }
+        
+        function updateDeliveryMarkers() {
+            // Remove existing markers
+            deliveryMarkers.forEach(m => map.removeLayer(m));
+            deliveryMarkers = [];
+            
+            // Add new markers
+            const colors = ['#3498db', '#2ecc71', '#9b59b6', '#f39c12', '#e74c3c', '#1abc9c'];
+            
+            deliveries.forEach((d, i) => {
+                const color = colors[i % colors.length];
+                const marker = L.marker([d.lat, d.lng], {
+                    icon: L.divIcon({
+                        className: 'delivery-marker',
+                        html: `<div style="background: ${color}; color: white; padding: 3px 8px; border-radius: 50%; font-weight: bold; text-align: center; width: 25px; height: 25px; line-height: 19px;">${i + 1}</div>`,
+                        iconSize: [25, 25]
+                    })
+                }).bindPopup(`<b>${d.name}</b><br>Priority: ${d.priority}`).addTo(map);
+                
+                deliveryMarkers.push(marker);
+            });
+        }
+        
+        function updateDeliveryList() {
+            const list = document.getElementById('delivery-list');
+            list.innerHTML = deliveries.map((d, i) => `
+                <div class="delivery-item">
+                    <span>${i + 1}. ${d.name} (P: ${d.priority})</span>
+                    <span class="remove" onclick="removeDelivery(${i})">✕</span>
+                </div>
+            `).join('');
+        }
+        
+        async function optimizeRoute() {
+            if (deliveries.length === 0) {
+                showStatus('Add at least one delivery first!', 'error');
+                return;
+            }
+            
+            showStatus('Optimizing route...', 'loading');
+            
+            const payload = {
+                current_loc: [
+                    parseFloat(document.getElementById('depot-lat').value),
+                    parseFloat(document.getElementById('depot-lng').value)
+                ],
+                deliveries: deliveries,
+                traffic_level: document.getElementById('traffic-level').value,
+                include_map: false
+            };
+            
+            try {
+                const response = await fetch(`${API_URL}/optimize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                displayResults(result);
+                drawRoute(result);
+                showStatus('Route optimized successfully!', 'success');
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}. Is the API server running?`, 'error');
+                console.error(error);
+            }
+        }
+        
+        function displayResults(result) {
+            document.getElementById('results').style.display = 'block';
+            document.getElementById('result-distance').textContent = `${(result.total_distance / 1000).toFixed(2)} km`;
+            document.getElementById('result-eta').textContent = `${result.total_eta.toFixed(1)} min`;
+            document.getElementById('result-improvement').textContent = `${result.improvement_over_greedy?.toFixed(1) || 0}%`;
+            document.getElementById('result-time').textContent = `${result.optimization_time.toFixed(3)}s`;
+        }
+        
+        function drawRoute(result) {
+            // Remove existing route
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+            
+            // Build route coordinates
+            const depotLat = parseFloat(document.getElementById('depot-lat').value);
+            const depotLng = parseFloat(document.getElementById('depot-lng').value);
+            
+            const coords = [[depotLat, depotLng]];
+            result.sequence.forEach(stop => {
+                coords.push([stop.delivery.lat, stop.delivery.lng]);
+            });
+            
+            // Draw polyline
+            routeLine = L.polyline(coords, {
+                color: '#667eea',
+                weight: 4,
+                opacity: 0.8
+            }).addTo(map);
+            
+            // Fit bounds
+            map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+        }
+        
+        function clearAll() {
+            deliveries = [];
+            updateDeliveryMarkers();
+            updateDeliveryList();
+            
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+            
+            document.getElementById('results').style.display = 'none';
+            showStatus('', '');
+        }
+        
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            if (message) {
+                status.className = `status ${type}`;
+                status.textContent = message;
+                status.style.display = 'block';
+            } else {
+                status.style.display = 'none';
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('depot-lat').addEventListener('change', updateDepotMarker);
+        document.getElementById('depot-lng').addEventListener('change', updateDepotMarker);
+    </script>
+</body>
+</html>

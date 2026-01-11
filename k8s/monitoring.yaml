@@ -1,0 +1,352 @@
+# =============================================================================
+# Monitoring Stack - ServiceMonitor for Prometheus Operator
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: quantum-traffic-monitor
+  namespace: quantum-traffic
+  labels:
+    app.kubernetes.io/name: quantum-traffic
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: quantum-traffic
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - quantum-traffic
+
+---
+# =============================================================================
+# PrometheusRule for Alerting
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: quantum-traffic-alerts
+  namespace: quantum-traffic
+  labels:
+    app.kubernetes.io/name: quantum-traffic
+    release: prometheus
+spec:
+  groups:
+    - name: quantum-traffic.rules
+      rules:
+        # High Error Rate
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="quantum-traffic",status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="quantum-traffic"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            service: quantum-traffic
+          annotations:
+            summary: "High error rate detected"
+            description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+        # High Latency
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="quantum-traffic"}[5m])) by (le)) > 2
+          for: 5m
+          labels:
+            severity: warning
+            service: quantum-traffic
+          annotations:
+            summary: "High API latency detected"
+            description: "95th percentile latency is {{ $value | humanizeDuration }}"
+
+        # Optimization Timeout
+        - alert: SlowOptimization
+          expr: |
+            histogram_quantile(0.95, sum(rate(optimization_duration_seconds_bucket[5m])) by (le)) > 10
+          for: 10m
+          labels:
+            severity: warning
+            service: quantum-traffic
+          annotations:
+            summary: "Optimization taking too long"
+            description: "95th percentile optimization time is {{ $value | humanizeDuration }}"
+
+        # High Memory Usage
+        - alert: HighMemoryUsage
+          expr: |
+            container_memory_usage_bytes{container="quantum-traffic"}
+            /
+            container_spec_memory_limit_bytes{container="quantum-traffic"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: quantum-traffic
+          annotations:
+            summary: "High memory usage"
+            description: "Memory usage is {{ $value | humanizePercentage }}"
+
+        # Pod Not Ready
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{namespace="quantum-traffic",condition="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            service: quantum-traffic
+          annotations:
+            summary: "Pod not ready"
+            description: "Pod {{ $labels.pod }} has been not ready for 5 minutes"
+
+        # High Rate Limit Hits
+        - alert: HighRateLimitHits
+          expr: |
+            sum(rate(rate_limit_hits_total[5m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+            service: quantum-traffic
+          annotations:
+            summary: "High rate limit hits"
+            description: "Rate limit is being hit frequently"
+
+        # Database Connection Issues
+        - alert: DatabaseConnectionFailed
+          expr: |
+            quantum_traffic_health_check{component="database"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: quantum-traffic
+          annotations:
+            summary: "Database connection failed"
+            description: "Cannot connect to database"
+
+        # Redis Connection Issues
+        - alert: RedisConnectionFailed
+          expr: |
+            quantum_traffic_health_check{component="cache"} == 0
+          for: 2m
+          labels:
+            severity: warning
+            service: quantum-traffic
+          annotations:
+            summary: "Redis connection failed"
+            description: "Cannot connect to Redis cache"
+
+---
+# =============================================================================
+# Grafana Dashboard ConfigMap
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quantum-traffic-dashboard
+  namespace: quantum-traffic
+  labels:
+    grafana_dashboard: "true"
+data:
+  quantum-traffic.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 80 }
+                ]
+              },
+              "unit": "reqps"
+            }
+          },
+          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.0.0",
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{job=\"quantum-traffic\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.01 },
+                  { "color": "red", "value": 0.05 }
+                ]
+              },
+              "unit": "percentunit"
+            }
+          },
+          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.0.0",
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{job=\"quantum-traffic\",status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"quantum-traffic\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "title": "Error Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.5 },
+                  { "color": "red", "value": 1 }
+                ]
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.0.0",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"quantum-traffic\"}[5m])) by (le))",
+              "refId": "A"
+            }
+          ],
+          "title": "P95 Latency",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null }
+                ]
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.0.0",
+          "targets": [
+            {
+              "expr": "sum(optimization_requests_total{job=\"quantum-traffic\",status=\"success\"})",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Optimizations",
+          "type": "stat"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["quantum-traffic"],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Quantum Traffic Optimizer",
+      "uid": "quantum-traffic",
+      "version": 1,
+      "weekStart": ""
+    }

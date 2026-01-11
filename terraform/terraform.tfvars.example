@@ -1,0 +1,24 @@
+# =============================================================================
+# Quantum Traffic Optimizer - Terraform Variables Example
+# =============================================================================
+# Copy this file to terraform.tfvars and customize for your environment
+# =============================================================================
+
+# AWS Region (Mumbai for India-based traffic optimization)
+aws_region = "ap-south-1"
+
+# Environment: development, staging, production
+environment = "development"
+
+# Domain name for the application (optional)
+domain_name = "quantum-traffic.example.com"
+
+# Enable enhanced monitoring (recommended for production)
+enable_monitoring = true
+
+# Enable WAF for API protection (recommended for production)
+enable_waf = false
+
+# CIDR blocks allowed to access the cluster
+# For production, restrict to your office/VPN IPs
+allowed_cidr_blocks = ["0.0.0.0/0"]

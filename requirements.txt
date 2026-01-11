@@ -1,0 +1,88 @@
+# =========================
+# Core Dependencies
+# =========================
+
+# Qiskit for QAOA quantum-inspired optimization
+qiskit>=1.0.0,<2.0.0
+qiskit-aer>=0.14.0,<1.0.0
+
+# Graph and network
+osmnx>=1.9.0,<2.0.0
+networkx>=3.0,<4.0
+
+# Web framework
+fastapi>=0.100.0,<1.0.0
+uvicorn>=0.30.0,<1.0.0
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+python-multipart>=0.0.9,<1.0.0
+websockets>=12.0,<13.0
+
+# Numerical computing
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0,<2.0.0
+
+# Visualization
+folium>=0.14.0,<1.0.0
+matplotlib>=3.7.0,<4.0.0
+
+# =========================
+# Production Dependencies
+# =========================
+
+# Security & Authentication
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+
+# Database (PostgreSQL with async support)
+sqlalchemy>=2.0.0,<3.0.0
+asyncpg>=0.29.0,<1.0.0
+alembic>=1.13.0,<2.0.0
+
+# Redis for caching
+redis>=5.0.0,<6.0.0
+
+# Monitoring & Metrics
+prometheus-client>=0.19.0,<1.0.0
+
+# Structured logging (optional - for advanced JSON logging)
+# structlog>=24.0.0,<25.0.0
+
+# Error tracking (optional)
+# sentry-sdk[fastapi]>=1.40.0,<2.0.0
+
+# =========================
+# Testing Dependencies
+# =========================
+
+pytest>=7.0.0,<9.0.0
+pytest-cov>=4.0.0,<6.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+httpx>=0.24.0,<1.0.0
+
+# =========================
+# Frontend (Optional)
+# =========================
+
+streamlit>=1.30.0,<2.0.0
+streamlit-folium>=0.15.0,<1.0.0
+
+# =========================
+# Development Tools (Optional)
+# =========================
+
+# Jupyter experiments
+jupyter>=1.0.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+deap>=1.4.0,<2.0.0
+
+# Load testing (optional)
+# locust>=2.20.0,<3.0.0
+
+# Code quality (optional - install separately)
+# black>=24.0.0
+# isort>=5.13.0
+# flake8>=7.0.0
+# mypy>=1.8.0
+# bandit>=1.7.0
+# safety>=3.0.0

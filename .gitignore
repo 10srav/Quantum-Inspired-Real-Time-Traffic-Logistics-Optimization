@@ -1,0 +1,131 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data files (except .gitkeep)
+data/*.graphml
+data/*.pkl
+!data/.gitkeep
+
+# Experiment outputs
+experiments/*.csv
+experiments/*.png
+
+# Frontend build
+frontend/node_modules/
+frontend/build/
+frontend/.next/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# =============================================================================
+# Production - Additional Ignores
+# =============================================================================
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+terraform/crash.log
+terraform/*.tfvars
+!terraform/terraform.tfvars.example
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+*.bak
+nul
+
+# Load test reports
+load_test_report.html
+
+# Security - Never commit these
+*.pem
+*.key
+*.crt
+*.p12
+credentials.json
+secrets.json
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# Cache directories
+cache/
+.cache/

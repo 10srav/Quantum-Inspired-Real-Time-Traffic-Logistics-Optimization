@@ -1,0 +1,11 @@
+# =============================================================================
+# Quantum Traffic Optimizer - Kubernetes Namespace
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: quantum-traffic
+  labels:
+    app.kubernetes.io/name: quantum-traffic
+    app.kubernetes.io/component: namespace
+    environment: production

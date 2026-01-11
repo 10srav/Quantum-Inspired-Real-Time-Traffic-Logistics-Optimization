@@ -1,0 +1,47 @@
+# =============================================================================
+# Quantum Traffic Optimizer - Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-traffic-service
+  namespace: quantum-traffic
+  labels:
+    app.kubernetes.io/name: quantum-traffic
+    app.kubernetes.io/component: service
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: quantum-traffic
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
+
+---
+# =============================================================================
+# Headless Service for StatefulSet (if needed)
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-traffic-headless
+  namespace: quantum-traffic
+  labels:
+    app.kubernetes.io/name: quantum-traffic
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: quantum-traffic
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
