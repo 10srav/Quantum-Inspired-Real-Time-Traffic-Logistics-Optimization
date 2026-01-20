@@ -5,6 +5,7 @@
 import Navbar from '../components/Layout/Navbar';
 import RouteMap from '../components/Map/RouteMap';
 import OptimizationPanel from '../components/Dashboard/OptimizationPanel';
+import LocationSearch from '../components/Dashboard/LocationSearch';
 import DeliveryList from '../components/Dashboard/DeliveryList';
 import OptimizationResults from '../components/Dashboard/OptimizationResults';
 
@@ -38,9 +39,9 @@ const Dashboard = () => {
                     <div className="lg:col-span-2">
                         <div className="glass-card p-4 h-[600px]">
                             <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                                🗺️ Route Map
+                                Route Map
                                 <span className="text-xs text-gray-500 font-normal ml-2">
-                                    Click on the map to add delivery points
+                                    Search for a location or click on the map to add delivery points
                                 </span>
                             </h2>
                             <div className="h-[calc(100%-40px)] rounded-xl overflow-hidden">
@@ -50,14 +51,19 @@ const Dashboard = () => {
                     </div>
 
                     {/* Sidebar */}
-                    <div className="space-y-6">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                         {/* Controls */}
-                        <div className="glass-card p-5">
+                        <div className="glass-card" style={{ padding: '24px' }}>
                             <OptimizationPanel />
                         </div>
 
+                        {/* Location Search */}
+                        <div className="glass-card" style={{ padding: '24px' }}>
+                            <LocationSearch />
+                        </div>
+
                         {/* Deliveries */}
-                        <div className="glass-card p-5">
+                        <div className="glass-card" style={{ padding: '24px' }}>
                             <DeliveryList />
                         </div>
                     </div>

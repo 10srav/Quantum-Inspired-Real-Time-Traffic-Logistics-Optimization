@@ -132,7 +132,7 @@ class SequenceStop(BaseModel):
 class OptimizeResult(BaseModel):
     """
     Response schema for route optimization.
-    
+
     Attributes:
         route_id: Unique identifier for this route.
         sequence: Ordered list of stops.
@@ -142,6 +142,7 @@ class OptimizeResult(BaseModel):
         traffic_level: Traffic condition used.
         map_html: Optional Folium map HTML.
         improvement_over_greedy: Percentage improvement vs greedy.
+        route_geometry: List of path segments, each as list of [lat, lng] coords.
     """
     route_id: str = Field(..., description="Unique route identifier")
     sequence: List[SequenceStop] = Field(..., description="Ordered stops")
@@ -153,6 +154,10 @@ class OptimizeResult(BaseModel):
     improvement_over_greedy: Optional[float] = Field(
         default=None,
         description="% improvement over greedy"
+    )
+    route_geometry: Optional[List[List[List[float]]]] = Field(
+        default=None,
+        description="Route path segments as list of [[lat, lng], ...] coordinates following actual roads"
     )
 
 

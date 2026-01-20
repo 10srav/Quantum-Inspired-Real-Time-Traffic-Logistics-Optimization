@@ -129,3 +129,6 @@ dmypy.json
 # Cache directories
 cache/
 .cache/
+
+# Local Claude settings
+.claude/

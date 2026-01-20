@@ -109,15 +109,23 @@ const RouteMap = () => {
 
     const { center, bbox, zoom } = VIJAYAWADA_CONFIG;
 
-    // Create route coordinates for polyline
-    const routeCoords = useMemo(() => {
+    // Create route coordinates for polyline - use actual road geometry if available
+    const routeSegments = useMemo(() => {
         if (!lastResult?.sequence) return null;
 
+        // If we have road geometry from backend, use it
+        if (lastResult.route_geometry && lastResult.route_geometry.length > 0) {
+            return lastResult.route_geometry.map(segment =>
+                segment.map(coord => [coord[0], coord[1]] as [number, number])
+            );
+        }
+
+        // Fallback to straight lines if no geometry available
         const coords: [number, number][] = [currentLocation];
         for (const stop of lastResult.sequence) {
             coords.push([stop.delivery.lat, stop.delivery.lng]);
         }
-        return coords;
+        return [coords]; // Wrap in array to match segments format
     }, [lastResult, currentLocation]);
 
     // Get sequence position for a delivery
@@ -208,32 +216,34 @@ const RouteMap = () => {
                 );
             })}
 
-            {/* Optimized route polyline */}
-            {routeCoords && (
+            {/* Optimized route polylines - following actual roads */}
+            {routeSegments && routeSegments.map((segment, index) => (
                 <Polyline
-                    positions={routeCoords}
+                    key={index}
+                    positions={segment}
                     pathOptions={{
                         color: '#667eea',
-                        weight: 4,
-                        opacity: 0.8,
-                        dashArray: lastResult ? undefined : '10, 10',
+                        weight: 5,
+                        opacity: 0.85,
                     }}
                 >
-                    <Popup>
-                        <div className="text-gray-900">
-                            <strong>🚀 Optimized Route</strong>
-                            <br />
-                            {lastResult && (
-                                <span className="text-sm">
-                                    Distance: {(lastResult.total_distance / 1000).toFixed(2)} km
-                                    <br />
-                                    ETA: {lastResult.total_eta.toFixed(1)} min
-                                </span>
-                            )}
-                        </div>
-                    </Popup>
+                    {index === 0 && (
+                        <Popup>
+                            <div className="text-gray-900">
+                                <strong>🚀 Optimized Route</strong>
+                                <br />
+                                {lastResult && (
+                                    <span className="text-sm">
+                                        Distance: {(lastResult.total_distance / 1000).toFixed(2)} km
+                                        <br />
+                                        ETA: {lastResult.total_eta.toFixed(1)} min
+                                    </span>
+                                )}
+                            </div>
+                        </Popup>
+                    )}
                 </Polyline>
-            )}
+            ))}
         </MapContainer>
     );
 };

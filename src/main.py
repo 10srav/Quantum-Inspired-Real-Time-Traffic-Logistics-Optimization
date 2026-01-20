@@ -462,6 +462,110 @@ async def optimize_route(
         # Extract priorities (depot has priority 0)
         priorities = [0.0] + [d.priority for d in request.deliveries]
 
+        # Special case: single delivery - no optimization needed
+        if n == 2:
+            # With only one delivery, the optimal route is trivial: depot -> delivery
+            start_time_single = time.time()
+
+            # Compute distance for single delivery
+            dist_matrix = state.graph.precompute_shortest_paths(locations)
+
+            # Update traffic and get congestion weights
+            state.traffic_sim.update_congestion(request.traffic_level)
+            congestion_matrix = state.traffic_sim.get_congestion_matrix(locations)
+
+            # Direct route: depot (0) -> delivery (1)
+            opt_sequence = [0, 1]
+            single_distance = dist_matrix[0, 1]
+            congestion = congestion_matrix[0, 1]
+            single_eta = calculate_eta(single_distance, congestion_factor=congestion)
+
+            opt_time = time.time() - start_time_single
+            algorithm = "direct"
+            improvement = 0.0  # No improvement possible with single delivery
+
+            # Build sequence stop for single delivery
+            delivery = request.deliveries[0]
+            sequence_stops = [
+                SequenceStop(
+                    position=0,
+                    delivery=delivery,
+                    distance_from_prev=single_distance,
+                    eta_from_prev=single_eta,
+                    cumulative_distance=single_distance,
+                    cumulative_eta=single_eta
+                )
+            ]
+
+            # Generate route ID
+            route_id = generate_route_id()
+
+            # Generate map if requested
+            map_html = None
+            if request.include_map and settings.FEATURE_MAP_GENERATION:
+                map_html = generate_route_map(
+                    locations,
+                    opt_sequence,
+                    request.deliveries,
+                    route_id
+                )
+
+            # Store route data
+            route_data = {
+                "locations": locations,
+                "sequence": opt_sequence,
+                "deliveries": [d.model_dump() for d in request.deliveries],
+                "traffic_level": request.traffic_level,
+                "map_html": map_html,
+                "total_distance": single_distance,
+                "total_eta": single_eta,
+                "user_id": user.id if user else None,
+            }
+
+            state.add_route(route_id, route_data)
+
+            # Track metrics
+            track_optimization(
+                traffic_level=request.traffic_level,
+                algorithm=algorithm,
+                n_deliveries=1,
+                duration=opt_time,
+                improvement=improvement,
+                total_distance=single_distance,
+                total_eta=single_eta,
+                success=True
+            )
+
+            # Compute route geometry (actual road paths)
+            route_geometry = state.graph.get_route_geometry(locations, opt_sequence)
+            # Convert to list format for JSON serialization
+            route_geometry_json = [
+                [[coord[0], coord[1]] for coord in segment]
+                for segment in route_geometry
+            ]
+
+            logger.info(
+                f"Route optimized (single delivery): {route_id}",
+                extra={
+                    "route_id": route_id,
+                    "n_deliveries": 1,
+                    "algorithm": algorithm,
+                    "optimization_time": opt_time,
+                }
+            )
+
+            return OptimizeResult(
+                route_id=route_id,
+                sequence=sequence_stops,
+                total_distance=single_distance,
+                total_eta=single_eta,
+                optimization_time=opt_time,
+                traffic_level=request.traffic_level,
+                map_html=map_html,
+                improvement_over_greedy=improvement,
+                route_geometry=route_geometry_json
+            )
+
         # Compute distance matrix
         dist_matrix = state.graph.precompute_shortest_paths(locations)
 
@@ -568,6 +672,14 @@ async def optimize_route(
             success=True
         )
 
+        # Compute route geometry (actual road paths)
+        route_geometry = state.graph.get_route_geometry(locations, opt_sequence)
+        # Convert to list format for JSON serialization
+        route_geometry_json = [
+            [[coord[0], coord[1]] for coord in segment]
+            for segment in route_geometry
+        ]
+
         logger.info(
             f"Route optimized: {route_id}",
             extra={
@@ -588,7 +700,8 @@ async def optimize_route(
             optimization_time=opt_time,
             traffic_level=request.traffic_level,
             map_html=map_html,
-            improvement_over_greedy=improvement
+            improvement_over_greedy=improvement,
+            route_geometry=route_geometry_json
         )
 
     except ValueError as e:

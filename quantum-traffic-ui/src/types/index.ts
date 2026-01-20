@@ -27,6 +27,7 @@ export interface OptimizeResult {
     improvement_over_greedy: number;
     optimization_time: number;
     traffic_level: string;
+    route_geometry?: number[][][]; // Array of path segments, each segment is array of [lat, lng] coords
 }
 
 // Optimization Request
@@ -112,6 +113,6 @@ export const VIJAYAWADA_CONFIG = {
 
 // API Configuration
 export const API_CONFIG = {
-    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-    wsUrl: import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws',
+    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8001',
+    wsUrl: import.meta.env.VITE_WS_URL || 'ws://localhost:8001/ws',
 } as const;
