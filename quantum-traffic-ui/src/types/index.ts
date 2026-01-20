@@ -113,6 +113,6 @@ export const VIJAYAWADA_CONFIG = {
 
 // API Configuration
 export const API_CONFIG = {
-    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-    wsUrl: import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws',
+    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8002',
+    wsUrl: import.meta.env.VITE_WS_URL || 'ws://localhost:8002/ws',
 } as const;
