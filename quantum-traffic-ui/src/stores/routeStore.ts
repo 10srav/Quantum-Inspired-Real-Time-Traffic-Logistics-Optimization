@@ -46,10 +46,10 @@ interface RouteState {
 }
 
 const SAMPLE_DELIVERIES: DeliveryPoint[] = [
-    { lat: 16.51, lng: 80.63, priority: 2.0, name: 'Delivery A' },
-    { lat: 16.52, lng: 80.64, priority: 1.0, name: 'Delivery B' },
-    { lat: 16.53, lng: 80.65, priority: 3.0, name: 'Delivery C' },
-    { lat: 16.54, lng: 80.66, priority: 1.5, name: 'Delivery D' },
+    { lat: 16.51, lng: 80.63, priority: 2.0, name: 'Location A' },
+    { lat: 16.52, lng: 80.64, priority: 1.0, name: 'Location B' },
+    { lat: 16.53, lng: 80.65, priority: 3.0, name: 'Location C' },
+    { lat: 16.54, lng: 80.66, priority: 1.5, name: 'Location D' },
 ];
 
 export const useRouteStore = create<RouteState>((set, get) => ({
@@ -67,7 +67,7 @@ export const useRouteStore = create<RouteState>((set, get) => ({
 
     // Delivery actions
     addDelivery: (delivery) => {
-        const name = delivery.name || `Delivery ${get().deliveries.length + 1}`;
+        const name = delivery.name || `Location ${get().deliveries.length + 1}`;
         set((state) => ({
             deliveries: [...state.deliveries, { ...delivery, name }],
         }));
@@ -105,7 +105,7 @@ export const useRouteStore = create<RouteState>((set, get) => ({
         const { currentLocation, deliveries, trafficLevel } = get();
 
         if (deliveries.length === 0) {
-            set({ error: 'Add at least one delivery first!' });
+            set({ error: 'Add at least one location first!' });
             return null;
         }
 

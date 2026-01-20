@@ -14,7 +14,7 @@ const OptimizationResults = () => {
                 <div className="text-4xl mb-3">📈</div>
                 <p className="text-gray-400">No optimization results yet</p>
                 <p className="text-sm text-gray-500 mt-1">
-                    Add deliveries and click "Optimize Route" to see results
+                    Add locations and click "Optimize Route" to see results
                 </p>
             </div>
         );
@@ -72,7 +72,7 @@ const OptimizationResults = () => {
                                     </span>
                                     <div>
                                         <span className="font-medium text-white">
-                                            {stop.delivery.name || `Delivery ${stop.position + 1}`}
+                                            {stop.delivery.name || `Location ${stop.position + 1}`}
                                         </span>
                                         <div className="text-sm text-gray-400">
                                             📍 {stop.delivery.lat.toFixed(4)}, {stop.delivery.lng.toFixed(4)}

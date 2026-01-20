@@ -202,7 +202,7 @@ const RouteMap = () => {
                     >
                         <Popup>
                             <div className="text-gray-900">
-                                <strong>{delivery.name || `Delivery ${index + 1}`}</strong>
+                                <strong>{delivery.name || `Location ${index + 1}`}</strong>
                                 {seqPos && <span className="ml-2 text-primary-600">Stop #{seqPos}</span>}
                                 <br />
                                 <span className="text-sm">

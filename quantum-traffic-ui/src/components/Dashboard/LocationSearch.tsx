@@ -77,7 +77,7 @@ const LocationSearch = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <span style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'linear-gradient(135deg, #10b981, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '18px' }}>+</span>
-                    Add Delivery
+                    Add Location
                 </h3>
                 <button
                     onClick={() => setShowManual(!showManual)}

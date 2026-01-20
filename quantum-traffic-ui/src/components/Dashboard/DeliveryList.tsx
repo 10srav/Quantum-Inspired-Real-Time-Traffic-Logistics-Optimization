@@ -31,7 +31,7 @@ const DeliveryList = () => {
                             <path fillRule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clipRule="evenodd" />
                         </svg>
                     </span>
-                    Deliveries
+                    Locations
                     {deliveries.length > 0 && (
                         <span style={{ padding: '4px 10px', borderRadius: '8px', background: 'rgba(59,130,246,0.2)', color: '#60a5fa', fontSize: '14px', fontWeight: 600, border: '1px solid rgba(59,130,246,0.3)' }}>
                             {deliveries.length}
@@ -66,7 +66,7 @@ const DeliveryList = () => {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                             </svg>
                         </div>
-                        <p style={{ color: '#d1d5db', fontWeight: 500 }}>No deliveries yet</p>
+                        <p style={{ color: '#d1d5db', fontWeight: 500 }}>No locations yet</p>
                         <p style={{ color: '#6b7280', fontSize: '14px', marginTop: '8px' }}>Search for a place or click on the map</p>
                     </div>
                 ) : (
@@ -104,7 +104,7 @@ const DeliveryList = () => {
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                             <span style={{ fontWeight: 600, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {delivery.name || `Delivery ${index + 1}`}
+                                                {delivery.name || `Location ${index + 1}`}
                                             </span>
                                             {seqPos && (
                                                 <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '12px', background: 'rgba(16,185,129,0.2)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', fontWeight: 500 }}>
