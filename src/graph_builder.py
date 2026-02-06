@@ -309,36 +309,200 @@ class OSMGraph:
     ) -> List[List[Tuple[float, float]]]:
         """
         Get route polyline coordinates for visualization.
-        
+
         Args:
             locations: List of (lat, lng) tuples.
             sequence: Order of location indices to visit.
-            
+
         Returns:
             List of polyline segments, each as list of (lat, lng) tuples.
         """
         route_segments = []
         nodes = [self.get_nearest_node(lat, lng) for lat, lng in locations]
-        
+
         for i in range(len(sequence) - 1):
             src_node = nodes[sequence[i]]
             dst_node = nodes[sequence[i + 1]]
-            
-            try:
-                path = nx.shortest_path(self.graph, src_node, dst_node, weight='length')
-                segment = [
-                    (self.graph.nodes[node]['y'], self.graph.nodes[node]['x'])
-                    for node in path
-                ]
-                route_segments.append(segment)
-            except nx.NetworkXNoPath:
-                # Fallback: direct line between points
-                src_loc = locations[sequence[i]]
-                dst_loc = locations[sequence[i + 1]]
-                route_segments.append([src_loc, dst_loc])
-        
+
+            segment = self._find_road_path(src_node, dst_node, locations[sequence[i]], locations[sequence[i + 1]])
+            route_segments.append(segment)
+
         return route_segments
-    
+
+    def _find_road_path(
+        self,
+        src_node: int,
+        dst_node: int,
+        src_loc: Tuple[float, float],
+        dst_loc: Tuple[float, float]
+    ) -> List[Tuple[float, float]]:
+        """
+        Find a road-following path between two nodes.
+
+        Tries multiple strategies to avoid direct lines through water/obstacles:
+        1. Direct shortest path (directed graph - respects one-way streets)
+        2. Undirected shortest path (ignores one-way restrictions)
+        3. Path via intermediate waypoints along roads
+        4. Curved road-following approximation
+
+        Args:
+            src_node: Source graph node.
+            dst_node: Destination graph node.
+            src_loc: Source (lat, lng) coordinates.
+            dst_loc: Destination (lat, lng) coordinates.
+
+        Returns:
+            List of (lat, lng) tuples forming a road-following path.
+        """
+        # Strategy 1: Try direct shortest path on directed graph first
+        try:
+            path = nx.shortest_path(self.graph, src_node, dst_node, weight='length')
+            return [
+                (self.graph.nodes[node]['y'], self.graph.nodes[node]['x'])
+                for node in path
+            ]
+        except nx.NetworkXNoPath:
+            pass
+
+        # Strategy 2: Try undirected graph (ignores one-way restrictions for visualization)
+        try:
+            undirected = self.graph.to_undirected()
+            path = nx.shortest_path(undirected, src_node, dst_node, weight='length')
+            return [
+                (self.graph.nodes[node]['y'], self.graph.nodes[node]['x'])
+                for node in path
+            ]
+        except nx.NetworkXNoPath:
+            pass
+
+        # Strategy 3: Try finding nearby nodes that ARE connected
+        try:
+            # Get neighbors within 500m of source and destination
+            src_neighbors = self._find_connected_nearby_nodes(src_node, src_loc, radius_km=0.5)
+            dst_neighbors = self._find_connected_nearby_nodes(dst_node, dst_loc, radius_km=0.5)
+
+            # Try to find a path through any combination of nearby nodes
+            undirected = self.graph.to_undirected()
+            best_path = None
+            best_length = float('inf')
+
+            for s_node in src_neighbors[:5]:  # Limit to top 5 for performance
+                for d_node in dst_neighbors[:5]:
+                    try:
+                        path = nx.shortest_path(undirected, s_node, d_node, weight='length')
+                        path_length = sum(
+                            self.graph.edges.get((path[i], path[i+1], 0), {}).get('length', 100)
+                            for i in range(len(path) - 1)
+                        )
+                        if path_length < best_length:
+                            best_length = path_length
+                            best_path = path
+                    except nx.NetworkXNoPath:
+                        continue
+
+            if best_path:
+                coords = [
+                    (self.graph.nodes[node]['y'], self.graph.nodes[node]['x'])
+                    for node in best_path
+                ]
+                # Prepend source location and append destination location
+                return [src_loc] + coords + [dst_loc]
+        except Exception:
+            pass
+
+        # Strategy 4: Create road-following curved path using nearby road nodes
+        return self._create_road_approximation_path(src_node, dst_node, src_loc, dst_loc)
+
+    def _find_connected_nearby_nodes(
+        self,
+        center_node: int,
+        center_loc: Tuple[float, float],
+        radius_km: float = 0.5
+    ) -> List[int]:
+        """
+        Find nodes near a location that are well-connected in the graph.
+
+        Args:
+            center_node: The center node.
+            center_loc: The center (lat, lng) coordinates.
+            radius_km: Search radius in kilometers.
+
+        Returns:
+            List of node IDs sorted by distance from center.
+        """
+        nearby_nodes = []
+        for node in self.graph.nodes():
+            node_lat = self.graph.nodes[node]['y']
+            node_lng = self.graph.nodes[node]['x']
+            dist = self._haversine(center_loc[0], center_loc[1], node_lat, node_lng)
+            if dist <= radius_km:
+                # Prefer nodes with more connections
+                degree = self.graph.degree(node)
+                nearby_nodes.append((node, dist, degree))
+
+        # Sort by distance, but prefer well-connected nodes
+        nearby_nodes.sort(key=lambda x: (x[1] - 0.1 * min(x[2], 5)))
+        return [n[0] for n in nearby_nodes]
+
+    def _create_road_approximation_path(
+        self,
+        src_node: int,
+        dst_node: int,
+        src_loc: Tuple[float, float],
+        dst_loc: Tuple[float, float]
+    ) -> List[Tuple[float, float]]:
+        """
+        Create an approximated path that follows nearby roads.
+
+        When no direct path exists, this finds nearby road nodes and
+        creates a path that visually follows the road network instead
+        of cutting through water or obstacles.
+        """
+        path_points = [src_loc]
+
+        # Use more waypoints for smoother path
+        num_waypoints = 10
+        last_added_node = None
+
+        for i in range(1, num_waypoints):
+            t = i / num_waypoints
+            # Interpolate position
+            interp_lat = src_loc[0] + t * (dst_loc[0] - src_loc[0])
+            interp_lng = src_loc[1] + t * (dst_loc[1] - src_loc[1])
+
+            # Find nearest road node to this interpolated position
+            nearest = self.get_nearest_node(interp_lat, interp_lng)
+
+            # Skip if same as last added node
+            if nearest == last_added_node:
+                continue
+
+            node_lat = self.graph.nodes[nearest]['y']
+            node_lng = self.graph.nodes[nearest]['x']
+
+            # Add the road node position (with larger threshold)
+            dist_to_line = self._haversine(interp_lat, interp_lng, node_lat, node_lng)
+            if dist_to_line < 1.0:  # 1 km threshold - more lenient
+                path_points.append((node_lat, node_lng))
+                last_added_node = nearest
+
+        path_points.append(dst_loc)
+
+        # Remove duplicates and very close points
+        unique_points = [path_points[0]]
+        for p in path_points[1:]:
+            last = unique_points[-1]
+            # Skip if very close to last point (less than 20m)
+            dist = self._haversine(p[0], p[1], last[0], last[1])
+            if dist > 0.02:  # 20 meters
+                unique_points.append(p)
+
+        # Ensure destination is included
+        if unique_points[-1] != dst_loc:
+            unique_points.append(dst_loc)
+
+        return unique_points
+
     def get_node_coordinates(self, node_id: int) -> Tuple[float, float]:
         """
         Get coordinates of a graph node.

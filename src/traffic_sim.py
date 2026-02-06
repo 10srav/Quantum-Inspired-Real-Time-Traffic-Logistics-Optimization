@@ -3,14 +3,19 @@ Traffic Simulator for Quantum Traffic Optimization.
 
 This module provides dynamic traffic congestion simulation for the road network,
 modifying edge weights based on simulated real-time traffic conditions.
+Supports real-time traffic API integration with automatic fallback to simulation.
 """
 
+import asyncio
+import logging
 import random
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from .graph_builder import OSMGraph
+
+logger = logging.getLogger(__name__)
 
 
 class TrafficSimulator:
@@ -245,17 +250,122 @@ class TrafficSimulator:
     def reset(self, seed: Optional[int] = None) -> None:
         """
         Reset the simulator to initial state.
-        
+
         Args:
             seed: New random seed (uses original if None).
         """
         if seed is not None:
             self.seed = seed
-        
+
         self.rng = np.random.default_rng(self.seed)
         random.seed(self.seed)
         self.edge_congestion.clear()
         self.update_congestion(self.congestion_level)
+
+    async def get_real_time_congestion_matrix(
+        self,
+        locations: List[Tuple[float, float]],
+        traffic_level: str = 'medium'
+    ) -> Tuple[np.ndarray, str]:
+        """
+        Get congestion matrix using real-time traffic API with fallback.
+
+        Attempts to fetch live traffic data from configured API (TomTom/HERE).
+        Falls back to simulation if API is disabled, fails, or times out.
+
+        Args:
+            locations: List of (lat, lng) tuples.
+            traffic_level: Fallback traffic level if API unavailable.
+
+        Returns:
+            Tuple of (congestion_matrix, source) where source is 'live' or 'simulated'.
+        """
+        from .config import get_settings
+        settings = get_settings()
+
+        # Check if real-time traffic API is enabled
+        if not settings.TRAFFIC_API_ENABLED:
+            logger.debug("Traffic API disabled, using simulation")
+            self.update_congestion(traffic_level)
+            return self.get_congestion_matrix(locations), 'simulated'
+
+        # Try to use real-time traffic API
+        try:
+            from .traffic_api import get_traffic_service
+
+            traffic_service = get_traffic_service()
+
+            # Check if service is properly configured
+            if traffic_service is None:
+                logger.warning("Traffic service not available, using simulation")
+                self.update_congestion(traffic_level)
+                return self.get_congestion_matrix(locations), 'simulated'
+
+            # Fetch real-time traffic matrix with timeout
+            logger.info(f"Fetching real-time traffic for {len(locations)} locations")
+
+            traffic_matrix = await asyncio.wait_for(
+                traffic_service.get_traffic_matrix(locations),
+                timeout=10.0  # 10 second timeout
+            )
+
+            if traffic_matrix is not None:
+                logger.info("Successfully fetched live traffic data")
+                return traffic_matrix, 'live'
+            else:
+                logger.warning("Traffic API returned None, using simulation")
+                self.update_congestion(traffic_level)
+                return self.get_congestion_matrix(locations), 'simulated'
+
+        except asyncio.TimeoutError:
+            logger.warning("Traffic API timeout, falling back to simulation")
+            self.update_congestion(traffic_level)
+            return self.get_congestion_matrix(locations), 'simulated'
+
+        except ImportError as e:
+            logger.warning(f"Traffic API module not available: {e}")
+            self.update_congestion(traffic_level)
+            return self.get_congestion_matrix(locations), 'simulated'
+
+        except Exception as e:
+            logger.error(f"Traffic API error: {e}, falling back to simulation")
+            self.update_congestion(traffic_level)
+            return self.get_congestion_matrix(locations), 'simulated'
+
+    def get_real_time_congestion_matrix_sync(
+        self,
+        locations: List[Tuple[float, float]],
+        traffic_level: str = 'medium'
+    ) -> Tuple[np.ndarray, str]:
+        """
+        Synchronous wrapper for get_real_time_congestion_matrix.
+
+        Uses asyncio.run() for sync contexts. For async contexts,
+        use get_real_time_congestion_matrix() directly.
+
+        Args:
+            locations: List of (lat, lng) tuples.
+            traffic_level: Fallback traffic level if API unavailable.
+
+        Returns:
+            Tuple of (congestion_matrix, source) where source is 'live' or 'simulated'.
+        """
+        try:
+            # Check if we're already in an async context
+            loop = asyncio.get_running_loop()
+            # If we get here, we're in an async context - create a task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    self.get_real_time_congestion_matrix(locations, traffic_level)
+                )
+                return future.result(timeout=15.0)
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(
+                self.get_real_time_congestion_matrix(locations, traffic_level)
+            )
 
 
 def demo():

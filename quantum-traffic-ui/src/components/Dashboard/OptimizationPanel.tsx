@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import useRouteStore from '../../stores/routeStore';
 import { VIJAYAWADA_CONFIG } from '../../types';
 
@@ -5,6 +6,9 @@ const OptimizationPanel = () => {
     const {
         currentLocation,
         setCurrentLocation,
+        startingLocationSet,
+        selectionMode,
+        setSelectionMode,
         trafficLevel,
         setTrafficLevel,
         optimizeRoute,
@@ -15,6 +19,56 @@ const OptimizationPanel = () => {
     } = useRouteStore();
 
     const { bbox } = VIJAYAWADA_CONFIG;
+
+    // Geolocation state
+    const [isLocating, setIsLocating] = useState(false);
+    const [geoError, setGeoError] = useState<string | null>(null);
+
+    const handleUseMyLocation = () => {
+        if (!navigator.geolocation) {
+            setGeoError('Geolocation is not supported by your browser');
+            return;
+        }
+
+        setIsLocating(true);
+        setGeoError(null);
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const { latitude, longitude } = position.coords;
+
+                // Validate within Vijayawada bbox
+                if (latitude >= bbox.lat_min && latitude <= bbox.lat_max &&
+                    longitude >= bbox.lng_min && longitude <= bbox.lng_max) {
+                    setCurrentLocation([
+                        parseFloat(latitude.toFixed(4)),
+                        parseFloat(longitude.toFixed(4))
+                    ]);
+                    setGeoError(null);
+                } else {
+                    setGeoError(`Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)}) is outside Vijayawada service area`);
+                }
+                setIsLocating(false);
+            },
+            (err) => {
+                let message = 'Failed to get location';
+                switch (err.code) {
+                    case err.PERMISSION_DENIED:
+                        message = 'Location permission denied';
+                        break;
+                    case err.POSITION_UNAVAILABLE:
+                        message = 'Location unavailable';
+                        break;
+                    case err.TIMEOUT:
+                        message = 'Location request timed out';
+                        break;
+                }
+                setGeoError(message);
+                setIsLocating(false);
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+        );
+    };
 
     const handleOptimize = async () => {
         await optimizeRoute();
@@ -66,6 +120,145 @@ const OptimizationPanel = () => {
                         />
                     </div>
                 </div>
+
+                {/* Select on Map Button */}
+                <button
+                    onClick={() => setSelectionMode(selectionMode === 'startingLocation' ? 'delivery' : 'startingLocation')}
+                    style={{
+                        width: '100%',
+                        marginTop: '12px',
+                        padding: '12px 16px',
+                        borderRadius: '10px',
+                        background: selectionMode === 'startingLocation'
+                            ? 'rgba(239,68,68,0.2)'
+                            : 'rgba(34,197,94,0.15)',
+                        border: selectionMode === 'startingLocation'
+                            ? '2px solid rgba(239,68,68,0.5)'
+                            : '1px solid rgba(34,197,94,0.4)',
+                        color: selectionMode === 'startingLocation' ? '#f87171' : '#4ade80',
+                        fontSize: '14px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s',
+                    }}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                    </svg>
+                    {selectionMode === 'startingLocation' ? 'Click Map to Set Start Point' : 'Select on Map'}
+                </button>
+
+                {/* Selection Mode Indicator */}
+                {selectionMode === 'startingLocation' && (
+                    <div style={{
+                        marginTop: '8px',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: 'rgba(239,68,68,0.1)',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}>
+                        <div style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            animation: 'pulse 1.5s infinite'
+                        }} />
+                        <span style={{ color: '#f87171', fontSize: '12px' }}>
+                            Click anywhere on the map to set your starting location
+                        </span>
+                    </div>
+                )}
+
+                {/* Starting Location Status */}
+                {startingLocationSet && selectionMode !== 'startingLocation' && (
+                    <div style={{
+                        marginTop: '8px',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        background: 'rgba(34,197,94,0.1)',
+                        border: '1px solid rgba(34,197,94,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}>
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="#4ade80">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <span style={{ color: '#4ade80', fontSize: '12px' }}>Starting location set</span>
+                    </div>
+                )}
+
+                {/* Use My Location Button - Keep as optional */}
+                <button
+                    onClick={handleUseMyLocation}
+                    disabled={isLocating}
+                    style={{
+                        width: '100%',
+                        marginTop: '8px',
+                        padding: '10px 16px',
+                        borderRadius: '10px',
+                        background: 'rgba(59,130,246,0.1)',
+                        border: '1px solid rgba(59,130,246,0.3)',
+                        color: '#60a5fa',
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        cursor: isLocating ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s',
+                        opacity: 0.8,
+                    }}
+                >
+                    {isLocating ? (
+                        <>
+                            <div style={{
+                                width: '14px',
+                                height: '14px',
+                                border: '2px solid rgba(96,165,250,0.3)',
+                                borderTopColor: '#60a5fa',
+                                borderRadius: '50%',
+                                animation: 'spin 1s linear infinite'
+                            }} />
+                            Locating...
+                        </>
+                    ) : (
+                        <>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+                            </svg>
+                            Use GPS (if in Vijayawada)
+                        </>
+                    )}
+                </button>
+
+                {/* Geolocation Error */}
+                {geoError && (
+                    <div style={{
+                        marginTop: '8px',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: 'rgba(239,68,68,0.1)',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}>
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="#f87171">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span style={{ color: '#f87171', fontSize: '12px' }}>{geoError}</span>
+                    </div>
+                )}
             </div>
 
             {/* Traffic Level */}

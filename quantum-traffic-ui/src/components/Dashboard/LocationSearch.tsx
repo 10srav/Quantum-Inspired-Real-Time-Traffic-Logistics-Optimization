@@ -18,11 +18,52 @@ const LocationSearch = () => {
     const [lat, setLat] = useState('');
     const [lng, setLng] = useState('');
     const [name, setName] = useState('');
+    const [isLocating, setIsLocating] = useState(false);
+    const [geoError, setGeoError] = useState<string | null>(null);
     const searchRef = useRef<HTMLDivElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const { addDelivery } = useRouteStore();
     const { bbox } = VIJAYAWADA_CONFIG;
+
+    const handleAddMyLocation = () => {
+        if (!navigator.geolocation) {
+            setGeoError('Geolocation not supported');
+            return;
+        }
+
+        setIsLocating(true);
+        setGeoError(null);
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const { latitude, longitude } = position.coords;
+
+                if (latitude >= bbox.lat_min && latitude <= bbox.lat_max &&
+                    longitude >= bbox.lng_min && longitude <= bbox.lng_max) {
+                    addDelivery({
+                        lat: parseFloat(latitude.toFixed(4)),
+                        lng: parseFloat(longitude.toFixed(4)),
+                        priority: 5,
+                        name: 'My Location'
+                    });
+                    setGeoError(null);
+                } else {
+                    setGeoError('Your location is outside Vijayawada service area');
+                }
+                setIsLocating(false);
+            },
+            (err) => {
+                let message = 'Failed to get location';
+                if (err.code === err.PERMISSION_DENIED) message = 'Permission denied';
+                else if (err.code === err.POSITION_UNAVAILABLE) message = 'Location unavailable';
+                else if (err.code === err.TIMEOUT) message = 'Request timed out';
+                setGeoError(message);
+                setIsLocating(false);
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+        );
+    };
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -132,8 +173,71 @@ const LocationSearch = () => {
                 </div>
             )}
 
-            <p style={{ marginTop: '16px', fontSize: '12px', color: '#6b7280' }}>
-                Search for places or click directly on the map
+            {/* Quick Add My Location Button */}
+            <button
+                onClick={handleAddMyLocation}
+                disabled={isLocating}
+                style={{
+                    width: '100%',
+                    marginTop: '12px',
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    background: 'rgba(59,130,246,0.15)',
+                    border: '1px solid rgba(59,130,246,0.4)',
+                    color: '#60a5fa',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: isLocating ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s',
+                }}
+            >
+                {isLocating ? (
+                    <>
+                        <div style={{
+                            width: '14px',
+                            height: '14px',
+                            border: '2px solid rgba(96,165,250,0.3)',
+                            borderTopColor: '#60a5fa',
+                            borderRadius: '50%',
+                            animation: 'spin 1s linear infinite'
+                        }} />
+                        Locating...
+                    </>
+                ) : (
+                    <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+                        </svg>
+                        Add My Current Location
+                    </>
+                )}
+            </button>
+
+            {/* Geolocation Error */}
+            {geoError && (
+                <div style={{
+                    marginTop: '8px',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: 'rgba(239,68,68,0.1)',
+                    border: '1px solid rgba(239,68,68,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                }}>
+                    <svg width="12" height="12" viewBox="0 0 20 20" fill="#f87171">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span style={{ color: '#f87171', fontSize: '11px' }}>{geoError}</span>
+                </div>
+            )}
+
+            <p style={{ marginTop: '12px', fontSize: '12px', color: '#6b7280' }}>
+                Search for places, use GPS, or click directly on the map
             </p>
         </div>
     );

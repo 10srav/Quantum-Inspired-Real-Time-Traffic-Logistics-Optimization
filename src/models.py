@@ -63,7 +63,7 @@ class OptimizeRequest(BaseModel):
     deliveries: List[DeliveryPoint] = Field(
         ...,
         min_length=1,
-        max_length=20,
+        max_length=500,
         description="Delivery locations to optimize"
     )
     traffic_level: str = Field(
@@ -178,13 +178,71 @@ class ErrorResponse(BaseModel):
 class ReoptimizeMessage(BaseModel):
     """
     WebSocket message for re-optimization.
-    
+
     Attributes:
         type: Message type ('update', 'traffic_change', 'new_delivery').
         data: Message payload.
     """
     type: str = Field(..., pattern='^(update|traffic_change|new_delivery|ack)$')
     data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SolverResultModel(BaseModel):
+    """
+    Result from a single solver execution.
+
+    Attributes:
+        name: Solver name (greedy, simulated_annealing, brute_force, qaoa).
+        sequence: Optimized sequence of location indices.
+        cost: QUBO cost (lower is better).
+        distance: Total route distance in meters.
+        solve_time: Execution time in seconds.
+        success: Whether the solver completed successfully.
+        error: Error message if failed.
+    """
+    name: str = Field(..., description="Solver name")
+    sequence: List[int] = Field(default_factory=list, description="Optimized sequence")
+    cost: float = Field(..., description="QUBO cost")
+    distance: float = Field(default=0.0, description="Total distance (m)")
+    solve_time: float = Field(..., ge=0, description="Execution time (s)")
+    success: bool = Field(..., description="Whether solver succeeded")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+class CompareResult(BaseModel):
+    """
+    Response schema for solver comparison.
+
+    Attributes:
+        solvers: List of results from each solver.
+        best_solver: Name of the solver with lowest cost.
+        improvements: Dict mapping solver names to improvement % vs greedy.
+        problem_size: Number of locations in the problem.
+        traffic_level: Traffic condition used.
+    """
+    solvers: List[SolverResultModel] = Field(..., description="Results from each solver")
+    best_solver: Optional[str] = Field(default=None, description="Name of best solver")
+    improvements: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Improvement percentages vs greedy"
+    )
+    problem_size: int = Field(..., ge=1, description="Number of locations")
+    traffic_level: str = Field(default="low", description="Traffic condition used")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "solvers": [
+                    {"name": "greedy", "sequence": [0, 1, 2], "cost": 5000.0, "distance": 2500.0, "solve_time": 0.001, "success": True},
+                    {"name": "simulated_annealing", "sequence": [0, 2, 1], "cost": 4500.0, "distance": 2200.0, "solve_time": 0.5, "success": True},
+                    {"name": "brute_force", "sequence": [0, 2, 1], "cost": 4500.0, "distance": 2200.0, "solve_time": 0.002, "success": True}
+                ],
+                "best_solver": "brute_force",
+                "improvements": {"simulated_annealing_vs_greedy": 10.0, "brute_force_vs_greedy": 10.0},
+                "problem_size": 3,
+                "traffic_level": "medium"
+            }
+        }
 
 
 # Sample data for testing (within smaller bbox)

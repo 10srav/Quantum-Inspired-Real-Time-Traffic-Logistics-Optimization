@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # API Settings
     # =========================
     API_PREFIX: str = Field(default="/api/v1", description="API prefix for versioning")
-    MAX_DELIVERIES: int = Field(default=20, description="Maximum deliveries per request")
+    MAX_DELIVERIES: int = Field(default=500, description="Maximum deliveries per request")
     REQUEST_TIMEOUT: int = Field(default=30, description="Request timeout in seconds")
     MAX_CACHED_ROUTES: int = Field(default=100, description="Maximum routes in memory cache")
 
@@ -125,6 +125,21 @@ class Settings(BaseSettings):
     TRAFFIC_MEDIUM_MULTIPLIER: float = Field(default=1.5, description="Medium traffic speed multiplier")
     TRAFFIC_HIGH_MULTIPLIER: float = Field(default=2.5, description="High traffic speed multiplier")
     DEFAULT_SPEED_KMH: float = Field(default=30.0, description="Default speed in km/h")
+
+    # =========================
+    # Real-Time Traffic API Settings
+    # =========================
+    TRAFFIC_API_ENABLED: bool = Field(default=False, description="Enable real-time traffic API")
+    TRAFFIC_API_PROVIDER: str = Field(default="tomtom", description="Traffic API provider (tomtom/here)")
+    TOMTOM_API_KEY: str = Field(default="", description="TomTom API key")
+    HERE_API_KEY: str = Field(default="", description="HERE API key")
+    TRAFFIC_CACHE_TTL: int = Field(default=300, description="Traffic cache TTL in seconds")
+
+    # =========================
+    # Clustering Settings (for large-scale optimization)
+    # =========================
+    CLUSTER_THRESHOLD: int = Field(default=40, description="Use clustering when n > this")
+    MAX_CLUSTER_SIZE: int = Field(default=40, description="Maximum nodes per cluster")
 
     # =========================
     # Monitoring Settings

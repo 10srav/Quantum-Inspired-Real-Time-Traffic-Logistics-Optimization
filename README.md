@@ -7,6 +7,10 @@ A production-grade Python/FastAPI + React/TypeScript application that optimizes 
 - **Quantum-Inspired Optimization**: QUBO encoding with QAOA solver (Qiskit)
 - **Real-Time Traffic Simulation**: Dynamic congestion modeling
 - **Interactive Map Visualization**: React-Leaflet with click-to-add markers
+- **User-Selectable Starting Location**: Click on map to set your start point (no geolocation required)
+- **Color-Coded Route Segments**: Each leg of the journey has a distinct color for easy identification
+- **Route Legend**: Visual legend showing all route legs with their colors
+- **Improved Path-Finding**: Routes follow actual roads using undirected graph fallback
 - **Modern React Dashboard**: TypeScript, Vite, Tailwind CSS, Zustand
 - **REST API**: FastAPI backend with JWT authentication
 - **WebSocket Support**: Real-time route updates
@@ -57,9 +61,14 @@ npm install
 
 ### Running the Application
 
-**Start Backend:**
+**Start Backend (Demo Mode - No Database Required):**
 ```bash
-uvicorn src.main:app --reload
+# Windows
+set OSM_DEMO_MODE=true && set DATABASE_ENABLED=false && set REDIS_ENABLED=false && uvicorn src.main:app --reload
+
+# Linux/Mac
+OSM_DEMO_MODE=true DATABASE_ENABLED=false REDIS_ENABLED=false uvicorn src.main:app --reload
+
 # API: http://localhost:8000
 # Docs: http://localhost:8000/docs
 ```
@@ -71,16 +80,27 @@ npm run dev
 # Dashboard: http://localhost:5173
 ```
 
+### How to Use
+
+1. **Set Starting Location**: Click the green "Select on Map" button, then click anywhere on the Vijayawada map
+2. **Add Delivery Points**: Click on the map to add delivery locations (or use the search/manual entry)
+3. **Select Traffic Level**: Choose low, medium, or high traffic conditions
+4. **Optimize Route**: Click "Optimize Route" to get the optimal delivery sequence
+5. **View Results**: See color-coded route segments on the map with distance/ETA for each leg
+
 ## 📱 React Dashboard
 
 The modern React dashboard provides:
 
 | Feature | Description |
 |---------|-------------|
-| 🗺️ Interactive Map | Click to add delivery points |
+| 🗺️ Interactive Map | Click to add delivery points or set starting location |
+| 📍 Starting Location | User-selectable start point (click "Select on Map" button) |
+| 🌈 Color-Coded Routes | Each route segment has a unique color (red, orange, yellow, green, etc.) |
+| 📋 Route Legend | Shows all route legs with their corresponding colors |
 | ⚡ Real-time Updates | WebSocket-based route optimization |
 | 🔐 JWT Authentication | Secure API access |
-| 📊 Metrics Display | Distance, ETA, improvement stats |
+| 📊 Metrics Display | Distance, ETA, improvement stats per segment |
 | 🌙 Dark Mode | Glassmorphism UI design |
 | 📱 Responsive | Mobile-friendly layout |
 
@@ -136,18 +156,27 @@ Optimize delivery sequence using QAOA.
 ```
 ├── src/                      # FastAPI Backend
 │   ├── main.py              # Application entry
-│   ├── graph_builder.py     # OSMnx graph ops
+│   ├── graph_builder.py     # OSMnx graph ops + path-finding
 │   ├── traffic_sim.py       # Traffic simulation
 │   ├── qubo_optimizer.py    # QUBO/QAOA core
+│   ├── clustering.py        # K-means for large deliveries
+│   ├── traffic_api.py       # TomTom/HERE integration
 │   ├── security.py          # JWT authentication
 │   └── models.py            # Pydantic schemas
 │
 ├── quantum-traffic-ui/       # React Dashboard
 │   ├── src/
-│   │   ├── components/      # UI components
+│   │   ├── components/
+│   │   │   ├── Dashboard/
+│   │   │   │   ├── OptimizationPanel.tsx    # Start location + controls
+│   │   │   │   ├── LocationSearch.tsx       # Location search/add
+│   │   │   │   ├── AlgorithmComparison.tsx  # Solver comparison
+│   │   │   │   └── ComparisonChart.tsx      # Performance chart
+│   │   │   └── Map/
+│   │   │       └── RouteMap.tsx             # Map + color-coded routes
 │   │   ├── pages/           # Route pages
 │   │   ├── services/        # API integration
-│   │   ├── stores/          # Zustand stores
+│   │   ├── stores/          # Zustand stores (routeStore with selection mode)
 │   │   └── types/           # TypeScript types
 │   ├── Dockerfile           # Production build
 │   └── nginx.conf           # Web server config

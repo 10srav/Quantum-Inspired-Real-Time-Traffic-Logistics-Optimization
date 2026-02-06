@@ -413,6 +413,98 @@ class QUBOOptimizer:
         
         return best_perm, best_cost
     
+    def solve_2opt(
+        self,
+        dist_matrix: np.ndarray,
+        initial_tour: List[int],
+        max_iterations: int = 1000
+    ) -> Tuple[List[int], float]:
+        """
+        Improve a tour using 2-opt and Or-opt local search.
+
+        Combines 2-opt (edge reversal) with Or-opt (segment relocation)
+        for comprehensive local search optimization.
+
+        Args:
+            dist_matrix: Distance matrix (n x n).
+            initial_tour: Starting tour to improve.
+            max_iterations: Maximum improvement iterations.
+
+        Returns:
+            Tuple of (improved_tour, total_distance).
+        """
+        def tour_distance(tour: List[int]) -> float:
+            return sum(dist_matrix[tour[i], tour[i + 1]] for i in range(len(tour) - 1))
+
+        tour = initial_tour.copy()
+        n = len(tour)
+        improved = True
+        iteration = 0
+
+        while improved and iteration < max_iterations:
+            improved = False
+            iteration += 1
+
+            # 2-opt moves: reverse segments
+            for i in range(1, n - 2):
+                for j in range(i + 1, n - 1):
+                    d_removed = (dist_matrix[tour[i - 1], tour[i]] +
+                                 dist_matrix[tour[j], tour[j + 1]])
+                    d_added = (dist_matrix[tour[i - 1], tour[j]] +
+                               dist_matrix[tour[i], tour[j + 1]])
+
+                    if d_added < d_removed - 1e-10:
+                        tour[i:j + 1] = tour[i:j + 1][::-1]
+                        improved = True
+
+            # Or-opt moves: relocate segments of 1, 2, or 3 nodes
+            for seg_len in [1, 2, 3]:
+                if n <= seg_len + 2:
+                    continue
+
+                for i in range(1, n - seg_len):
+                    # Current cost of segment and its neighbors
+                    seg_start = i
+                    seg_end = i + seg_len - 1
+
+                    if seg_end >= n - 1:
+                        continue
+
+                    # Cost of removing segment
+                    cost_remove = (
+                        dist_matrix[tour[seg_start - 1], tour[seg_start]] +
+                        dist_matrix[tour[seg_end], tour[seg_end + 1]] -
+                        dist_matrix[tour[seg_start - 1], tour[seg_end + 1]]
+                    )
+
+                    # Try inserting segment at each position
+                    for j in range(1, n - 1):
+                        if j >= seg_start - 1 and j <= seg_end + 1:
+                            continue  # Skip positions within or adjacent to segment
+
+                        # Cost of inserting segment at position j
+                        cost_insert = (
+                            dist_matrix[tour[j - 1], tour[seg_start]] +
+                            dist_matrix[tour[seg_end], tour[j]] -
+                            dist_matrix[tour[j - 1], tour[j]]
+                        )
+
+                        if cost_insert < cost_remove - 1e-10:
+                            # Perform the move
+                            segment = tour[seg_start:seg_end + 1]
+                            new_tour = tour[:seg_start] + tour[seg_end + 1:]
+                            insert_pos = j if j < seg_start else j - seg_len
+                            new_tour = new_tour[:insert_pos] + segment + new_tour[insert_pos:]
+                            tour = new_tour
+                            improved = True
+                            break
+                    if improved:
+                        break
+                if improved:
+                    break
+
+        return tour, tour_distance(tour)
+
     def solve_greedy(
         self,
         dist_matrix: np.ndarray,
@@ -485,6 +577,10 @@ class QUBOOptimizer:
         # Encode QUBO (needed for cost evaluation in all paths)
         qubo = self.encode_qubo(dist_matrix, priorities, congestion_weights, traffic_level)
 
+        # Helper to calculate actual route distance
+        def calc_distance(seq: List[int]) -> float:
+            return sum(dist_matrix[seq[i], seq[i + 1]] for i in range(len(seq) - 1))
+
         # Strategy selection based on problem size
         # Prefer brute force for small problems (deterministic and optimal)
         if n <= 8 and not use_qaoa:
@@ -501,8 +597,12 @@ class QUBOOptimizer:
                 dist_matrix, priorities, congestion_weights, traffic_level
             )
         else:
-            # Use simulated annealing for larger problems
-            sequence, cost = self.solve_simulated_annealing(qubo, n)
+            # For larger problems: use greedy + 2-opt improvement
+            greedy_seq, _ = self.solve_greedy(dist_matrix, start_idx=0)
+
+            # Improve greedy solution with 2-opt
+            sequence, _ = self.solve_2opt(dist_matrix, greedy_seq)
+            cost = self._evaluate_permutation(sequence, qubo, n)
 
         solve_time = time.time() - start_time
 
@@ -512,8 +612,218 @@ class QUBOOptimizer:
             sequence, _ = self.solve_greedy(dist_matrix)
             cost = self._evaluate_permutation(sequence, qubo, n)
 
+        # Final safety check: always compare with greedy and pick best
+        greedy_seq, _ = self.solve_greedy(dist_matrix, start_idx=0)
+        if calc_distance(greedy_seq) < calc_distance(sequence):
+            sequence = greedy_seq
+            cost = self._evaluate_permutation(sequence, qubo, n)
+
         return sequence, cost, solve_time
-    
+
+    def compare_solvers(
+        self,
+        dist_matrix: np.ndarray,
+        priorities: List[float],
+        congestion_weights: np.ndarray,
+        traffic_level: str = 'low',
+        include_qaoa: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Compare all available optimization methods on the same problem.
+
+        Runs greedy, simulated annealing, brute force (n<=8), and optionally QAOA
+        on the same distance matrix and returns comparative results.
+
+        Args:
+            dist_matrix: Distance matrix (n x n).
+            priorities: Priority weights for each location.
+            congestion_weights: Congestion multipliers matrix.
+            traffic_level: Traffic level ('low', 'medium', 'high').
+            include_qaoa: Whether to include QAOA (slow, only for n<=4).
+
+        Returns:
+            Dict with:
+                - solvers: List of solver results
+                - best_solver: Name of solver with lowest cost
+                - improvements: Dict of improvement percentages vs greedy
+                - problem_size: Number of locations
+        """
+        n = len(dist_matrix)
+        qubo = self.encode_qubo(dist_matrix, priorities, congestion_weights, traffic_level)
+
+        results = []
+
+        # 1. Greedy (baseline - always run)
+        try:
+            start = time.time()
+            seq, dist_cost = self.solve_greedy(dist_matrix)
+            cost = self._evaluate_permutation(seq, qubo, n)
+            results.append({
+                "name": "greedy",
+                "sequence": seq,
+                "cost": round(cost, 2),
+                "distance": round(dist_cost, 2),
+                "solve_time": round(time.time() - start, 4),
+                "success": True,
+                "error": None
+            })
+        except Exception as e:
+            results.append({
+                "name": "greedy",
+                "sequence": [],
+                "cost": float('inf'),
+                "distance": float('inf'),
+                "solve_time": 0,
+                "success": False,
+                "error": str(e)
+            })
+
+        # 2. Simulated Annealing
+        try:
+            start = time.time()
+            seq, cost = self.solve_simulated_annealing(qubo, n)
+            # Calculate actual distance
+            dist_cost = sum(dist_matrix[seq[i], seq[i+1]] for i in range(len(seq)-1))
+            results.append({
+                "name": "simulated_annealing",
+                "sequence": seq,
+                "cost": round(cost, 2),
+                "distance": round(dist_cost, 2),
+                "solve_time": round(time.time() - start, 4),
+                "success": True,
+                "error": None
+            })
+        except Exception as e:
+            results.append({
+                "name": "simulated_annealing",
+                "sequence": [],
+                "cost": float('inf'),
+                "distance": float('inf'),
+                "solve_time": 0,
+                "success": False,
+                "error": str(e)
+            })
+
+        # 3. Greedy + 2-opt (always run for better results)
+        try:
+            start = time.time()
+            greedy_seq, _ = self.solve_greedy(dist_matrix)
+            seq, dist_cost = self.solve_2opt(dist_matrix, greedy_seq)
+            cost = self._evaluate_permutation(seq, qubo, n)
+            results.append({
+                "name": "greedy_2opt",
+                "sequence": seq,
+                "cost": round(cost, 2),
+                "distance": round(dist_cost, 2),
+                "solve_time": round(time.time() - start, 4),
+                "success": True,
+                "error": None
+            })
+        except Exception as e:
+            results.append({
+                "name": "greedy_2opt",
+                "sequence": [],
+                "cost": float('inf'),
+                "distance": float('inf'),
+                "solve_time": 0,
+                "success": False,
+                "error": str(e)
+            })
+
+        # 4. Brute Force (only for n <= 8)
+        if n <= 8:
+            try:
+                start = time.time()
+                seq, cost = self.solve_brute_force(
+                    dist_matrix, priorities, congestion_weights, traffic_level
+                )
+                dist_cost = sum(dist_matrix[seq[i], seq[i+1]] for i in range(len(seq)-1))
+                results.append({
+                    "name": "brute_force",
+                    "sequence": seq,
+                    "cost": round(cost, 2),
+                    "distance": round(dist_cost, 2),
+                    "solve_time": round(time.time() - start, 4),
+                    "success": True,
+                    "error": None
+                })
+            except Exception as e:
+                results.append({
+                    "name": "brute_force",
+                    "sequence": [],
+                    "cost": float('inf'),
+                    "distance": float('inf'),
+                    "solve_time": 0,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        # 4. QAOA (only if requested and n <= 4)
+        if include_qaoa and QISKIT_AVAILABLE and n <= 4:
+            try:
+                start = time.time()
+                seq, cost = self.solve_qaoa(qubo, n)
+                dist_cost = sum(dist_matrix[seq[i], seq[i+1]] for i in range(len(seq)-1))
+                results.append({
+                    "name": "qaoa",
+                    "sequence": seq,
+                    "cost": round(cost, 2),
+                    "distance": round(dist_cost, 2),
+                    "solve_time": round(time.time() - start, 4),
+                    "success": True,
+                    "error": None
+                })
+            except Exception as e:
+                results.append({
+                    "name": "qaoa",
+                    "sequence": [],
+                    "cost": float('inf'),
+                    "distance": float('inf'),
+                    "solve_time": 0,
+                    "success": False,
+                    "error": str(e)
+                })
+        elif include_qaoa and not QISKIT_AVAILABLE:
+            results.append({
+                "name": "qaoa",
+                "sequence": [],
+                "cost": float('inf'),
+                "distance": float('inf'),
+                "solve_time": 0,
+                "success": False,
+                "error": "Qiskit not available"
+            })
+        elif include_qaoa and n > 4:
+            results.append({
+                "name": "qaoa",
+                "sequence": [],
+                "cost": float('inf'),
+                "distance": float('inf'),
+                "solve_time": 0,
+                "success": False,
+                "error": f"QAOA only supports n<=4, got n={n}"
+            })
+
+        # Find best solver and calculate improvements
+        successful = [r for r in results if r["success"]]
+        best = min(successful, key=lambda x: x["cost"]) if successful else None
+
+        greedy_result = next((r for r in results if r["name"] == "greedy" and r["success"]), None)
+        improvements = {}
+
+        if greedy_result and greedy_result["cost"] > 0:
+            for r in successful:
+                if r["name"] != "greedy":
+                    pct = ((greedy_result["cost"] - r["cost"]) / greedy_result["cost"]) * 100
+                    improvements[f"{r['name']}_vs_greedy"] = round(pct, 2)
+
+        return {
+            "solvers": results,
+            "best_solver": best["name"] if best else None,
+            "improvements": improvements,
+            "problem_size": n
+        }
+
     def _evaluate_solution(
         self,
         bitstring: str,
@@ -593,6 +903,43 @@ class QUBOOptimizer:
         if len(sequence) != n:
             return False
         return set(sequence) == set(range(n))
+
+    def optimize_large_scale(
+        self,
+        locations: List[Tuple[float, float]],
+        priorities: List[float],
+        dist_matrix: np.ndarray,
+        congestion_weights: np.ndarray,
+        traffic_level: str = 'low',
+        cluster_threshold: int = 40
+    ) -> Tuple[List[int], float, float, Dict[str, Any]]:
+        """
+        Optimize large-scale problems using hierarchical clustering.
+
+        For problems with more than cluster_threshold nodes, uses K-means
+        clustering to divide the problem into smaller sub-problems.
+
+        Args:
+            locations: List of (lat, lng) coordinates.
+            priorities: Priority weights for each location.
+            dist_matrix: Distance matrix.
+            congestion_weights: Congestion multipliers matrix.
+            traffic_level: Traffic level.
+            cluster_threshold: Use clustering when n > this.
+
+        Returns:
+            Tuple of (sequence, cost, solve_time, metadata).
+        """
+        from .clustering import create_hierarchical_optimizer
+
+        hierarchical = create_hierarchical_optimizer(
+            qubo_optimizer=self,
+            cluster_threshold=cluster_threshold
+        )
+
+        return hierarchical.optimize(
+            locations, priorities, dist_matrix, congestion_weights, traffic_level
+        )
 
 
 def demo():

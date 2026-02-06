@@ -88,6 +88,25 @@ export interface RouteHistoryEntry {
     timestamp: string;
 }
 
+// Solver Comparison Types
+export interface SolverResult {
+    name: string;
+    sequence: number[];
+    cost: number;
+    distance: number;
+    solve_time: number;
+    success: boolean;
+    error?: string;
+}
+
+export interface CompareResult {
+    solvers: SolverResult[];
+    best_solver: string | null;
+    improvements: Record<string, number>;
+    problem_size: number;
+    traffic_level: string;
+}
+
 // WebSocket Message Types
 export interface WSReoptimizeMessage {
     type: 'traffic_update' | 'route_update' | 'error';

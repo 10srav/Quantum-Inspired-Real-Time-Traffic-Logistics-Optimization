@@ -7,6 +7,7 @@ import {
     API_CONFIG,
     type OptimizeRequest,
     type OptimizeResult,
+    type CompareResult,
     type LoginCredentials,
     type AuthTokens,
     type APIInfo,
@@ -83,6 +84,13 @@ export const authAPI = {
 export const optimizationAPI = {
     optimize: async (request: OptimizeRequest): Promise<OptimizeResult> => {
         const response = await api.post<OptimizeResult>('/optimize', request);
+        return response.data;
+    },
+
+    compare: async (request: OptimizeRequest, includeQaoa: boolean = false): Promise<CompareResult> => {
+        const response = await api.post<CompareResult>('/compare', request, {
+            params: { include_qaoa: includeQaoa }
+        });
         return response.data;
     },
 

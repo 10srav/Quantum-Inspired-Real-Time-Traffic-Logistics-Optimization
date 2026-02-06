@@ -6,14 +6,20 @@ import { create } from 'zustand';
 import {
     type DeliveryPoint,
     type OptimizeResult,
+    type CompareResult,
     type RouteHistoryEntry,
     VIJAYAWADA_CONFIG
 } from '../types';
 import { optimizationAPI } from '../services/api';
 
+// Selection mode for map clicks
+type SelectionMode = 'delivery' | 'startingLocation';
+
 interface RouteState {
     // Current state
     currentLocation: [number, number];
+    startingLocationSet: boolean; // Whether user has explicitly set starting location
+    selectionMode: SelectionMode;
     deliveries: DeliveryPoint[];
     trafficLevel: 'low' | 'medium' | 'high';
 
@@ -22,11 +28,16 @@ interface RouteState {
     isOptimizing: boolean;
     error: string | null;
 
+    // Comparison
+    comparisonResult: CompareResult | null;
+    isComparing: boolean;
+
     // History
     routeHistory: RouteHistoryEntry[];
 
     // Actions
     setCurrentLocation: (loc: [number, number]) => void;
+    setSelectionMode: (mode: SelectionMode) => void;
     addDelivery: (delivery: DeliveryPoint) => void;
     removeDelivery: (index: number) => void;
     updateDelivery: (index: number, delivery: Partial<DeliveryPoint>) => void;
@@ -36,7 +47,9 @@ interface RouteState {
 
     // Optimization
     optimizeRoute: () => Promise<OptimizeResult | null>;
+    compareRoutes: (includeQaoa?: boolean) => Promise<CompareResult | null>;
     clearResult: () => void;
+    clearComparison: () => void;
 
     // Sample data
     addSampleDeliveries: () => void;
@@ -55,15 +68,25 @@ const SAMPLE_DELIVERIES: DeliveryPoint[] = [
 export const useRouteStore = create<RouteState>((set, get) => ({
     // Initial state
     currentLocation: VIJAYAWADA_CONFIG.center,
+    startingLocationSet: false,
+    selectionMode: 'delivery',
     deliveries: [],
     trafficLevel: 'medium',
     lastResult: null,
     isOptimizing: false,
     error: null,
+    comparisonResult: null,
+    isComparing: false,
     routeHistory: [],
 
     // Location actions
-    setCurrentLocation: (loc) => set({ currentLocation: loc }),
+    setCurrentLocation: (loc) => set({
+        currentLocation: loc,
+        startingLocationSet: true,
+        selectionMode: 'delivery' // Auto switch back to delivery mode after setting
+    }),
+
+    setSelectionMode: (mode) => set({ selectionMode: mode }),
 
     // Delivery actions
     addDelivery: (delivery) => {
@@ -143,6 +166,40 @@ export const useRouteStore = create<RouteState>((set, get) => ({
 
     clearResult: () => set({ lastResult: null, error: null }),
 
+    // Comparison
+    compareRoutes: async (includeQaoa = false) => {
+        const { currentLocation, deliveries, trafficLevel } = get();
+
+        if (deliveries.length === 0) {
+            set({ error: 'Add at least one location first!' });
+            return null;
+        }
+
+        set({ isComparing: true, error: null });
+
+        try {
+            const result = await optimizationAPI.compare({
+                current_loc: currentLocation,
+                deliveries,
+                traffic_level: trafficLevel,
+                include_map: false,
+            }, includeQaoa);
+
+            set({
+                comparisonResult: result,
+                isComparing: false,
+            });
+
+            return result;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Comparison failed';
+            set({ error: message, isComparing: false });
+            return null;
+        }
+    },
+
+    clearComparison: () => set({ comparisonResult: null }),
+
     // Sample data
     addSampleDeliveries: () => {
         set((state) => {
@@ -160,11 +217,15 @@ export const useRouteStore = create<RouteState>((set, get) => ({
     // Reset all
     reset: () => set({
         currentLocation: VIJAYAWADA_CONFIG.center,
+        startingLocationSet: false,
+        selectionMode: 'delivery',
         deliveries: [],
         trafficLevel: 'medium',
         lastResult: null,
         isOptimizing: false,
         error: null,
+        comparisonResult: null,
+        isComparing: false,
     }),
 }));
 

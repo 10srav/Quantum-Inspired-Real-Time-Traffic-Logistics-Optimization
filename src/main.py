@@ -52,6 +52,7 @@ from .metrics import (
     update_websocket_connections,
 )
 from .models import (
+    CompareResult,
     DeliveryPoint,
     ErrorResponse,
     HealthResponse,
@@ -59,6 +60,7 @@ from .models import (
     OptimizeResult,
     ReoptimizeMessage,
     SequenceStop,
+    SolverResultModel,
 )
 from .qubo_optimizer import QUBOOptimizer
 from .security import (
@@ -573,9 +575,14 @@ async def optimize_route(
         state.traffic_sim.update_congestion(request.traffic_level)
         congestion_matrix = state.traffic_sim.get_congestion_matrix(locations)
 
-        # Determine algorithm to use
-        use_qaoa = settings.USE_QAOA_IN_API and n <= 8  # QAOA only for small instances
-        algorithm = "qaoa" if use_qaoa else "brute_force"
+        # Determine algorithm to use based on problem size
+        use_qaoa = settings.USE_QAOA_IN_API and n <= 4  # QAOA only for tiny instances
+        if use_qaoa:
+            algorithm = "qaoa"
+        elif n <= 8:
+            algorithm = "brute_force"
+        else:
+            algorithm = "simulated_annealing"
 
         # Run optimization
         opt_sequence, opt_cost, opt_time = state.optimizer.optimize(
@@ -588,15 +595,36 @@ async def optimize_route(
 
         # Ensure depot is first
         if opt_sequence[0] != 0:
-            opt_sequence.remove(0)
+            if 0 in opt_sequence:
+                opt_sequence.remove(0)
             opt_sequence.insert(0, 0)
+
+        # Validate that all nodes are included in the sequence
+        expected_nodes = set(range(n))
+        actual_nodes = set(opt_sequence)
+        missing_nodes = expected_nodes - actual_nodes
+
+        if missing_nodes:
+            logger.warning(
+                f"Sequence missing {len(missing_nodes)} nodes, adding them",
+                extra={"missing_nodes": list(missing_nodes)}
+            )
+            # Add missing nodes at the end (will be optimized by 2-opt)
+            for node in sorted(missing_nodes):
+                opt_sequence.append(node)
 
         # Compute greedy baseline for comparison
         greedy_seq, greedy_cost = state.optimizer.solve_greedy(dist_matrix, start_idx=0)
-        improvement = compute_improvement(
-            calculate_route_distance(opt_sequence, dist_matrix),
-            calculate_route_distance(greedy_seq, dist_matrix)
-        )
+        opt_distance = calculate_route_distance(opt_sequence, dist_matrix)
+        greedy_distance = calculate_route_distance(greedy_seq, dist_matrix)
+
+        # If simulated annealing gave worse result, use greedy instead
+        if opt_distance > greedy_distance:
+            opt_sequence = greedy_seq
+            opt_distance = greedy_distance
+            algorithm = "greedy"
+
+        improvement = compute_improvement(opt_distance, greedy_distance)
 
         # Build sequence stops
         sequence_stops = []
@@ -720,6 +748,98 @@ async def optimize_route(
             success=False
         )
         raise OptimizationException(f"Optimization failed: {str(e)}")
+
+
+@app.post(
+    "/compare",
+    response_model=CompareResult,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+        500: {"model": ErrorResponse, "description": "Comparison failed"},
+        503: {"model": ErrorResponse, "description": "Service not available"},
+    },
+    tags=["Optimization"],
+    summary="Compare Optimization Methods",
+    description="Compare all available optimization algorithms on the same problem.",
+)
+async def compare_methods(
+    request: OptimizeRequest,
+    _: Annotated[None, Depends(check_rate_limit)] = None,
+    include_qaoa: bool = Query(False, description="Include QAOA solver (slow, only for n<=4)"),
+):
+    """
+    Compare all optimization algorithms on the same dataset.
+
+    Runs greedy, simulated annealing, brute force (n<=8), and optionally QAOA
+    on the same problem and returns comparative results with execution times
+    and improvement percentages.
+    """
+    start_time = time.time()
+
+    # Validate state
+    if state.graph is None or state.optimizer is None:
+        raise GraphNotLoadedException()
+
+    try:
+        # Build locations list: current_loc + all deliveries
+        locations = [request.current_loc]
+        for d in request.deliveries:
+            locations.append((d.lat, d.lng))
+
+        n = len(locations)
+
+        # Extract priorities (depot has priority 0)
+        priorities = [0.0] + [d.priority for d in request.deliveries]
+
+        # Compute distance matrix
+        dist_matrix = state.graph.precompute_shortest_paths(locations)
+
+        # Update traffic and get congestion weights
+        state.traffic_sim.update_congestion(request.traffic_level)
+        congestion_matrix = state.traffic_sim.get_congestion_matrix(locations)
+
+        # Run comparison
+        comparison = state.optimizer.compare_solvers(
+            dist_matrix,
+            priorities,
+            congestion_matrix,
+            request.traffic_level,
+            include_qaoa=include_qaoa
+        )
+
+        total_time = time.time() - start_time
+
+        logger.info(
+            f"Solver comparison completed",
+            extra={
+                "n_locations": n,
+                "traffic_level": request.traffic_level,
+                "best_solver": comparison["best_solver"],
+                "total_time": total_time,
+                "include_qaoa": include_qaoa
+            }
+        )
+
+        # Convert to response model
+        solver_results = [
+            SolverResultModel(**solver) for solver in comparison["solvers"]
+        ]
+
+        return CompareResult(
+            solvers=solver_results,
+            best_solver=comparison["best_solver"],
+            improvements=comparison["improvements"],
+            problem_size=comparison["problem_size"],
+            traffic_level=request.traffic_level
+        )
+
+    except ValueError as e:
+        logger.warning(f"Validation error in comparison: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Comparison failed: {e}")
+        raise OptimizationException(f"Comparison failed: {str(e)}")
 
 
 # =========================
