@@ -79,7 +79,7 @@ src/                          quantum-traffic-ui/src/
 
 ### Core Modules
 
-- **qubo_optimizer.py**: QUBO encoding of TSP, QAOA solver via Qiskit (configurable layers), greedy fallback. Methods: `encode_qubo()`, `solve_qaoa()`, `solve_greedy()`
+- **qubo_optimizer.py**: QUBO encoding of TSP, QAOA solver via Qiskit (direct n<=6 via MPS, hybrid n<=10 via window decomposition), greedy fallback. Methods: `encode_qubo()`, `solve_qaoa()`, `solve_qaoa_hybrid()`, `solve_greedy()`, `_get_adaptive_params()`
 - **traffic_sim.py**: Dynamic congestion with Poisson distribution. Traffic levels: low (1.0x), medium (1.5x), high (2.5x). Methods: `update_congestion()`, `get_dynamic_weights()`
 - **graph_builder.py**: OSMnx graph manager for Vijayawada bounding box (16.50-16.55, 80.62-80.68). Falls back to synthetic demo graph. Precomputes shortest paths with Dijkstra
 - **clustering.py**: Hierarchical K-means clustering for 200+ delivery points. Auto-computes optimal K via silhouette score. Class: `HierarchicalOptimizer`
@@ -100,9 +100,12 @@ Environment variables loaded via `src/config.py` (Pydantic BaseSettings):
 | `OSM_DEMO_MODE` | false | Use synthetic graph instead of downloading OSM |
 | `DATABASE_ENABLED` | true | Enable PostgreSQL |
 | `REDIS_ENABLED` | true | Enable Redis caching |
-| `QAOA_LAYERS` | 3 | QAOA circuit depth (p parameter) |
-| `QAOA_TIMEOUT` | 5 | Optimization timeout in seconds |
-| `USE_QAOA_IN_API` | true | Use QAOA vs greedy in API |
+| `QAOA_LAYERS` | 3 | QAOA circuit depth (auto-reduced for n>4) |
+| `QAOA_TIMEOUT` | 30 | Optimization timeout in seconds (MPS needs ~20s for 36 qubits) |
+| `USE_QAOA_IN_API` | false | Use QAOA in API (direct n<=6, hybrid n<=10) |
+| `QAOA_MAX_NODES` | 10 | Maximum nodes for QAOA solver |
+| `QAOA_HYBRID_WINDOW` | 5 | Sub-problem window size for hybrid QAOA (n>6) |
+| `QAOA_HYBRID_OVERLAP` | 2 | Overlap between hybrid QAOA windows |
 
 Frontend uses Vite env vars: `VITE_API_URL`, `VITE_WS_URL`
 

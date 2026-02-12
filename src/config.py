@@ -113,10 +113,13 @@ class Settings(BaseSettings):
     # =========================
     # QAOA/Optimization Settings
     # =========================
-    QAOA_LAYERS: int = Field(default=3, description="Number of QAOA layers")
-    QAOA_TIMEOUT: float = Field(default=5.0, description="QAOA optimization timeout")
+    QAOA_LAYERS: int = Field(default=3, description="Number of QAOA layers (auto-reduced for n>4)")
+    QAOA_TIMEOUT: float = Field(default=30.0, description="QAOA optimization timeout in seconds")
     QAOA_SEED: int = Field(default=42, description="Random seed for reproducibility")
-    USE_QAOA_IN_API: bool = Field(default=False, description="Use QAOA in API (slower)")
+    USE_QAOA_IN_API: bool = Field(default=False, description="Use QAOA in API (supports up to n=10)")
+    QAOA_MAX_NODES: int = Field(default=10, description="Maximum nodes for QAOA solver (direct n<=6, hybrid n<=10)")
+    QAOA_HYBRID_WINDOW: int = Field(default=5, description="Window size for hybrid QAOA decomposition")
+    QAOA_HYBRID_OVERLAP: int = Field(default=2, description="Overlap between hybrid QAOA windows")
 
     # =========================
     # Traffic Settings

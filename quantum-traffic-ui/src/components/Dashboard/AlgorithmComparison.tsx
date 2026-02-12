@@ -64,7 +64,7 @@ const AlgorithmComparison = () => {
                         Compare QAOA, Greedy, Simulated Annealing, and Brute Force algorithms
                     </p>
                     <button
-                        onClick={() => compareRoutes(false)}
+                        onClick={() => compareRoutes(true)}
                         disabled={isComparing || deliveries.length === 0}
                         style={{
                             padding: '14px 28px',

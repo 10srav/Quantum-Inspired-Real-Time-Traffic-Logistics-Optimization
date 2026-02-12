@@ -152,7 +152,12 @@ async def lifespan(app: FastAPI):
 
     # Initialize graph
     logger.info("Loading OSM graph...")
-    state.graph = OSMGraph(use_cache=settings.OSM_USE_CACHE)
+    state.graph = OSMGraph(
+        bbox=(settings.BBOX_SOUTH, settings.BBOX_NORTH, settings.BBOX_WEST, settings.BBOX_EAST),
+        cache_dir=settings.OSM_CACHE_DIR,
+        use_cache=settings.OSM_USE_CACHE,
+        demo_mode=settings.OSM_DEMO_MODE,
+    )
 
     if state.graph.graph is not None:
         update_graph_metrics(
@@ -576,13 +581,15 @@ async def optimize_route(
         congestion_matrix = state.traffic_sim.get_congestion_matrix(locations)
 
         # Determine algorithm to use based on problem size
-        use_qaoa = settings.USE_QAOA_IN_API and n <= 4  # QAOA only for tiny instances
-        if use_qaoa:
-            algorithm = "qaoa"
+        use_qaoa = settings.USE_QAOA_IN_API and n <= settings.QAOA_MAX_NODES
+        if use_qaoa and n <= 6:
+            algorithm = "qaoa_direct"
+        elif use_qaoa:
+            algorithm = "qaoa_hybrid"
         elif n <= 8:
             algorithm = "brute_force"
         else:
-            algorithm = "simulated_annealing"
+            algorithm = "greedy_2opt"
 
         # Run optimization
         opt_sequence, opt_cost, opt_time = state.optimizer.optimize(
@@ -766,7 +773,7 @@ async def optimize_route(
 async def compare_methods(
     request: OptimizeRequest,
     _: Annotated[None, Depends(check_rate_limit)] = None,
-    include_qaoa: bool = Query(False, description="Include QAOA solver (slow, only for n<=4)"),
+    include_qaoa: bool = Query(False, description="Include QAOA solver (direct n<=6, hybrid n<=10)"),
 ):
     """
     Compare all optimization algorithms on the same dataset.

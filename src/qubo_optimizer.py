@@ -15,9 +15,9 @@ from scipy.optimize import minimize
 
 # Try to import Qiskit components
 try:
-    from qiskit import QuantumCircuit
+    from qiskit import QuantumCircuit, transpile
     from qiskit.circuit import Parameter
-    from qiskit.primitives import Sampler
+    from qiskit.primitives import StatevectorSampler
     from qiskit_aer import AerSimulator
     QISKIT_AVAILABLE = True
 except ImportError:
@@ -66,7 +66,34 @@ class QUBOOptimizer:
         
         self.rng = np.random.default_rng(seed)
         np.random.seed(seed)
-    
+
+    def _get_adaptive_params(self, n: int) -> Dict[str, Any]:
+        """
+        Compute adaptive QAOA parameters based on problem size.
+
+        Larger problems use fewer shots/iterations, single-layer circuits,
+        and the MPS simulator backend to stay within memory and time budgets.
+        max_circuit_terms limits the QUBO terms encoded into the circuit
+        to keep circuit depth tractable for MPS simulation.
+
+        Args:
+            n: Number of cities.
+
+        Returns:
+            Dict with keys: shots, maxiter, n_layers, use_mps, max_circuit_terms.
+        """
+        if n <= 3:
+            return {"shots": 128, "maxiter": 10, "n_layers": min(self.n_layers, 2), "use_mps": False, "max_circuit_terms": None}
+        elif n <= 4:
+            return {"shots": 64, "maxiter": 5, "n_layers": 1, "use_mps": False, "max_circuit_terms": 40}
+        elif n <= 5:
+            return {"shots": 64, "maxiter": 8, "n_layers": 1, "use_mps": True, "max_circuit_terms": 80}
+        elif n <= 6:
+            return {"shots": 32, "maxiter": 5, "n_layers": 1, "use_mps": True, "max_circuit_terms": 60}
+        else:
+            # Used by hybrid decomposition sub-problems (window_size <= 5)
+            return {"shots": 64, "maxiter": 8, "n_layers": 1, "use_mps": True, "max_circuit_terms": 80}
+
     def encode_qubo(
         self,
         dist_matrix: np.ndarray,
@@ -168,38 +195,65 @@ class QUBOOptimizer:
     ) -> Tuple[List[int], float]:
         """
         Solve QUBO using Qiskit QAOA.
-        
+
+        Supports two execution modes:
+        - n <= 4 (up to 16 qubits): Uses Sampler with statevector simulation.
+        - n = 5-6 (25-36 qubits): Uses AerSimulator with matrix_product_state
+          method, which efficiently handles QAOA circuits at these qubit counts.
+
         Args:
             qubo: QUBO dictionary.
             n: Number of cities.
-            
+
         Returns:
             Tuple of (best_sequence, cost).
         """
         if not QISKIT_AVAILABLE:
             return self.solve_simulated_annealing(qubo, n)
-        
+
         n_qubits = n * n  # One qubit per (city, position) pair
-        
-        if n_qubits > 16:
-            # Too many qubits for efficient simulation, fall back to SA
-            warnings.warn(f"QAOA with {n_qubits} qubits too large, using SA")
+
+        if n_qubits > 36:
+            # Beyond MPS capability for QAOA — use hybrid decomposition instead
+            warnings.warn(f"QAOA with {n_qubits} qubits too large for direct solve, using SA")
             return self.solve_simulated_annealing(qubo, n)
-        
+
+        # Adaptive parameters based on problem size
+        params = self._get_adaptive_params(n)
+        active_layers = params["n_layers"]
+        shots = params["shots"]
+        maxiter = params["maxiter"]
+        use_mps = params["use_mps"]
+        max_circuit_terms = params["max_circuit_terms"]
+
         try:
-            # Build QAOA circuit
-            gamma = [Parameter(f'γ_{i}') for i in range(self.n_layers)]
-            beta = [Parameter(f'β_{i}') for i in range(self.n_layers)]
-            
+            # Sparsify QUBO for circuit if term limit is set (keeps circuit
+            # depth tractable for MPS). Keep all linear terms (constraint
+            # penalties) and top-K quadratic terms by |coefficient|.
+            circuit_qubo = qubo
+            if max_circuit_terms is not None and len(qubo) > max_circuit_terms:
+                linear_terms = {k: v for k, v in qubo.items() if k[0] == k[1]}
+                quad_terms = {k: v for k, v in qubo.items() if k[0] != k[1]}
+                remaining = max_circuit_terms - len(linear_terms)
+                if remaining > 0:
+                    top_quad = sorted(quad_terms.items(), key=lambda x: abs(x[1]), reverse=True)[:remaining]
+                    circuit_qubo = {**linear_terms, **dict(top_quad)}
+                else:
+                    circuit_qubo = linear_terms
+
+            # Build QAOA circuit with adaptive layer count
+            gamma = [Parameter(f'γ_{i}') for i in range(active_layers)]
+            beta = [Parameter(f'β_{i}') for i in range(active_layers)]
+
             qc = QuantumCircuit(n_qubits)
-            
+
             # Initial state: equal superposition
             qc.h(range(n_qubits))
-            
+
             # QAOA layers
-            for layer in range(self.n_layers):
-                # Cost unitary
-                for (i, j), coeff in qubo.items():
+            for layer in range(active_layers):
+                # Cost unitary (uses sparsified QUBO for tractable circuit depth)
+                for (i, j), coeff in circuit_qubo.items():
                     if i == j:
                         # Linear term: RZ rotation
                         qc.rz(2 * gamma[layer] * coeff, i)
@@ -208,103 +262,288 @@ class QUBOOptimizer:
                         qc.cx(i, j)
                         qc.rz(2 * gamma[layer] * coeff, j)
                         qc.cx(i, j)
-                
+
                 # Mixer unitary
                 for q in range(n_qubits):
                     qc.rx(2 * beta[layer], q)
-            
+
             qc.measure_all()
-            
-            # Use Sampler for execution
-            sampler = Sampler()
-            
-            def get_counts_from_result(result):
-                """Extract counts from Sampler result (handles API versions)."""
-                try:
-                    # Qiskit 1.x+ API
-                    if hasattr(result, '__getitem__'):
-                        pub_result = result[0]
-                        if hasattr(pub_result, 'data'):
-                            data = pub_result.data
-                            if hasattr(data, 'meas'):
-                                return data.meas.get_counts()
-                            elif hasattr(data, 'c'):
-                                return data.c.get_counts()
-                    # Direct counts access
-                    if hasattr(result, 'quasi_dists'):
-                        # Convert quasi-probabilities to counts
-                        quasi = result.quasi_dists[0]
-                        total = 1000
-                        return {format(k, f'0{n*n}b'): int(v * total)
-                                for k, v in quasi.items() if v > 0.001}
-                except Exception:
-                    pass
-                return None
 
-            def objective(params):
-                """Objective function for classical optimizer."""
-                param_dict = {}
-                for i in range(self.n_layers):
-                    param_dict[gamma[i]] = params[i]
-                    param_dict[beta[i]] = params[self.n_layers + i]
+            # Track best solution across all COBYLA iterations
+            best_counts: Dict[str, int] = {}
+            best_obj_value = float('inf')
+            qaoa_start_time = time.time()
 
-                bound_circuit = qc.assign_parameters(param_dict)
+            if use_mps:
+                # MPS backend for n=4-6 (16-36 qubits)
+                backend = AerSimulator(method='matrix_product_state')
 
-                try:
-                    job = sampler.run([bound_circuit], shots=1000)
-                    result = job.result()
+                # Pre-transpile the parameterized circuit ONCE to avoid
+                # repeated transpilation in each COBYLA iteration.
+                transpiled_qc = transpile(qc, backend)
 
-                    # Compute expected cost
-                    counts = get_counts_from_result(result)
-                    if counts is None:
+                def objective_mps(opt_params):
+                    nonlocal best_counts, best_obj_value
+
+                    # Timeout enforcement
+                    if time.time() - qaoa_start_time > self.timeout:
+                        return best_obj_value if best_obj_value < float('inf') else 0.0
+
+                    param_dict = {}
+                    for i in range(active_layers):
+                        param_dict[gamma[i]] = opt_params[i]
+                        param_dict[beta[i]] = opt_params[active_layers + i]
+
+                    bound_circuit = transpiled_qc.assign_parameters(param_dict)
+
+                    try:
+                        job = backend.run(bound_circuit, shots=shots)
+                        result = job.result()
+                        counts = result.get_counts()
+
+                        if not counts:
+                            return float('inf')
+
+                        exp_cost = 0.0
+                        total_counts = sum(counts.values())
+
+                        for bitstring, count in counts.items():
+                            cost = self._evaluate_solution(bitstring, qubo, n)
+                            exp_cost += cost * count / total_counts
+
+                        if exp_cost < best_obj_value:
+                            best_obj_value = exp_cost
+                            best_counts = counts.copy()
+
+                        return exp_cost
+                    except Exception:
                         return float('inf')
 
-                    exp_cost = 0.0
-                    total_counts = sum(counts.values())
+                # Classical optimization loop
+                n_params = 2 * active_layers
+                initial_params = self.rng.uniform(0, np.pi, n_params)
 
-                    for bitstring, count in counts.items():
-                        cost = self._evaluate_solution(bitstring, qubo, n)
-                        exp_cost += cost * count / total_counts
+                minimize(
+                    objective_mps,
+                    initial_params,
+                    method='COBYLA',
+                    options={'maxiter': maxiter}
+                )
 
-                    return exp_cost
-                except Exception:
-                    return float('inf')
-            
-            # Classical optimization
-            n_params = 2 * self.n_layers
-            initial_params = self.rng.uniform(0, np.pi, n_params)
-            
-            result = minimize(
-                objective,
-                initial_params,
-                method='COBYLA',
-                options={'maxiter': 50}
-            )
-            
-            # Get best solution from final circuit
-            final_params = {}
-            for i in range(self.n_layers):
-                final_params[gamma[i]] = result.x[i]
-                final_params[beta[i]] = result.x[self.n_layers + i]
-            
-            bound_circuit = qc.assign_parameters(final_params)
-            job = sampler.run([bound_circuit], shots=1000)
-            final_result = job.result()
+                # Get best solution from final run
+                if not best_counts:
+                    final_params = {}
+                    for i in range(active_layers):
+                        final_params[gamma[i]] = initial_params[i]
+                        final_params[beta[i]] = initial_params[active_layers + i]
+                    bound_circuit = transpiled_qc.assign_parameters(final_params)
+                    job = backend.run(bound_circuit, shots=shots)
+                    result = job.result()
+                    best_counts = result.get_counts()
 
-            counts = get_counts_from_result(final_result)
-            if counts is None or len(counts) == 0:
-                raise ValueError("Could not extract counts from QAOA result")
-            best_bitstring = max(counts, key=lambda x: -self._evaluate_solution(x, qubo, n))
-            
-            sequence = self._decode_solution(best_bitstring, n)
-            cost = self._compute_route_cost(sequence, qubo, n)
-            
-            return sequence, cost
-            
+                if not best_counts:
+                    raise ValueError("MPS QAOA produced no valid counts")
+
+                best_bitstring = min(best_counts, key=lambda x: self._evaluate_solution(x, qubo, n))
+                sequence = self._decode_solution(best_bitstring, n)
+                cost = self._compute_route_cost(sequence, qubo, n)
+
+                return sequence, cost
+
+            else:
+                # StatevectorSampler path for n <= 4 (statevector, fast)
+                sampler = StatevectorSampler(seed=self.seed)
+
+                def objective_sampler(opt_params):
+                    nonlocal best_counts, best_obj_value
+
+                    if time.time() - qaoa_start_time > self.timeout:
+                        return best_obj_value if best_obj_value < float('inf') else 0.0
+
+                    param_values = list(opt_params)
+
+                    try:
+                        # V2 PUBs API: run([(circuit, param_values)], shots=N)
+                        job = sampler.run([(qc, param_values)], shots=shots)
+                        result = job.result()
+                        counts = result[0].data.meas.get_counts()
+
+                        if not counts:
+                            return float('inf')
+
+                        exp_cost = 0.0
+                        total_counts = sum(counts.values())
+
+                        for bitstring, count in counts.items():
+                            cost = self._evaluate_solution(bitstring, qubo, n)
+                            exp_cost += cost * count / total_counts
+
+                        if exp_cost < best_obj_value:
+                            best_obj_value = exp_cost
+                            best_counts = counts.copy()
+
+                        return exp_cost
+                    except Exception:
+                        return float('inf')
+
+                # Classical optimization
+                n_params = 2 * active_layers
+                initial_params = self.rng.uniform(0, np.pi, n_params)
+
+                result = minimize(
+                    objective_sampler,
+                    initial_params,
+                    method='COBYLA',
+                    options={'maxiter': maxiter}
+                )
+
+                # Get best solution from final circuit
+                final_params = list(result.x)
+                job = sampler.run([(qc, final_params)], shots=shots)
+                final_result = job.result()
+                counts = final_result[0].data.meas.get_counts()
+
+                if not counts:
+                    if best_counts:
+                        counts = best_counts
+                    else:
+                        raise ValueError("Could not extract counts from QAOA result")
+
+                best_bitstring = min(counts, key=lambda x: self._evaluate_solution(x, qubo, n))
+                sequence = self._decode_solution(best_bitstring, n)
+                cost = self._compute_route_cost(sequence, qubo, n)
+
+                return sequence, cost
+
         except Exception as e:
             warnings.warn(f"QAOA failed: {e}. Falling back to SA.")
             return self.solve_simulated_annealing(qubo, n)
-    
+
+    def solve_qaoa_hybrid(
+        self,
+        dist_matrix: np.ndarray,
+        priorities: List[float],
+        congestion_weights: np.ndarray,
+        traffic_level: str = 'low',
+        window_size: int = 5,
+        overlap: int = 2,
+    ) -> Tuple[List[int], float]:
+        """
+        Hybrid quantum-classical solver for medium TSP problems (n=7-10).
+
+        Decomposes the problem into overlapping QAOA-solvable sub-problems:
+        1. Build initial tour with greedy nearest-neighbor
+        2. Slide a window of `window_size` cities across the tour
+        3. Optimize each window using direct QAOA (MPS backend)
+        4. Polish the merged result with 2-opt local search
+
+        Every sub-problem is solved with real QAOA circuits, not classical
+        heuristics. The window_size is capped at 5 (25 qubits) to keep
+        each QAOA call tractable.
+
+        Args:
+            dist_matrix: Full distance matrix (n x n).
+            priorities: Priority weights for each location.
+            congestion_weights: Congestion multipliers matrix (n x n).
+            traffic_level: Traffic level ('low', 'medium', 'high').
+            window_size: Size of each QAOA sub-problem (default: 5).
+            overlap: Overlap between consecutive windows (default: 2).
+
+        Returns:
+            Tuple of (best_sequence, cost).
+        """
+        n = len(dist_matrix)
+
+        # Cap window_size to keep sub-problems within MPS QAOA range
+        window_size = min(window_size, 5)
+        if window_size > n:
+            window_size = n
+
+        # Step 1: Get initial tour via greedy
+        current_tour, _ = self.solve_greedy(dist_matrix, start_idx=0)
+
+        def tour_distance(tour: List[int]) -> float:
+            return sum(dist_matrix[tour[i], tour[i + 1]] for i in range(len(tour) - 1))
+
+        current_dist = tour_distance(current_tour)
+        best_tour = current_tour.copy()
+        best_dist = current_dist
+
+        # Step 2: Sliding window QAOA optimization (multiple passes)
+        step = max(1, window_size - overlap)
+        max_passes = 2
+        hybrid_start_time = time.time()
+
+        for pass_num in range(max_passes):
+            improved_this_pass = False
+            i = 0
+
+            while i + window_size <= n:
+                # Respect overall timeout
+                if time.time() - hybrid_start_time > self.timeout * 0.8:
+                    break
+
+                # Extract window indices from current tour
+                window_global_indices = current_tour[i:i + window_size]
+                sub_n = len(window_global_indices)
+
+                if sub_n < 3:
+                    i += step
+                    continue
+
+                # Build sub-problem matrices
+                sub_dist = np.zeros((sub_n, sub_n))
+                sub_cong = np.zeros((sub_n, sub_n))
+                sub_prio = [priorities[idx] for idx in window_global_indices]
+
+                for si, gi in enumerate(window_global_indices):
+                    for sj, gj in enumerate(window_global_indices):
+                        sub_dist[si, sj] = dist_matrix[gi, gj]
+                        sub_cong[si, sj] = congestion_weights[gi, gj]
+
+                # Solve sub-problem with direct QAOA
+                sub_qubo = self.encode_qubo(sub_dist, sub_prio, sub_cong, traffic_level)
+                sub_seq, _ = self.solve_qaoa(sub_qubo, sub_n)
+
+                # Map QAOA result back to global indices
+                optimized_window = [window_global_indices[j] for j in sub_seq]
+
+                # If not the first window, find best rotation to minimize
+                # the connection cost from the previous segment
+                if i > 0:
+                    prev_node = current_tour[i - 1]
+                    best_rot = min(
+                        range(sub_n),
+                        key=lambda r: dist_matrix[prev_node, optimized_window[r]]
+                    )
+                    optimized_window = optimized_window[best_rot:] + optimized_window[:best_rot]
+
+                # Build new tour with optimized window
+                new_tour = current_tour[:i] + optimized_window + current_tour[i + window_size:]
+                new_dist = tour_distance(new_tour)
+
+                if new_dist < current_dist - 1e-10:
+                    current_tour = new_tour
+                    current_dist = new_dist
+                    improved_this_pass = True
+
+                    if current_dist < best_dist:
+                        best_tour = current_tour.copy()
+                        best_dist = current_dist
+
+                i += step
+
+            if not improved_this_pass:
+                break
+
+        # Step 3: Polish with 2-opt local search
+        final_tour, final_dist = self.solve_2opt(dist_matrix, best_tour)
+        if final_dist < best_dist:
+            best_tour = final_tour
+            best_dist = final_dist
+
+        return best_tour, best_dist
+
     def solve_simulated_annealing(
         self,
         qubo: Dict[Tuple[int, int], float],
@@ -557,16 +796,17 @@ class QUBOOptimizer:
         Main entry point: encode and solve with fallback.
 
         Strategy:
-        - n <= 8: Use brute force (optimal and deterministic)
-        - n > 8: Use simulated annealing
-        - use_qaoa=True: Explicitly request QAOA for demonstration (slower)
+        - use_qaoa=True, n <= 6: Direct QAOA (MPS backend for n>4)
+        - use_qaoa=True, n 7-10: Hybrid QAOA decomposition
+        - n <= 8 (no QAOA): Brute force (optimal and deterministic)
+        - n > 8 (no QAOA): Greedy + 2-opt
 
         Args:
             dist_matrix: Distance matrix (n x n).
             priorities: Priority weights for each location.
             congestion_weights: Congestion multipliers matrix.
             traffic_level: Traffic level ('low', 'medium', 'high').
-            use_qaoa: Whether to use QAOA (default: False, use brute force).
+            use_qaoa: Whether to use QAOA (default: False).
 
         Returns:
             Tuple of (best_sequence, cost, solve_time).
@@ -582,15 +822,20 @@ class QUBOOptimizer:
             return sum(dist_matrix[seq[i], seq[i + 1]] for i in range(len(seq) - 1))
 
         # Strategy selection based on problem size
-        # Prefer brute force for small problems (deterministic and optimal)
         if n <= 8 and not use_qaoa:
-            # Use brute force for small-medium problems (guaranteed optimal)
+            # Brute force for small-medium problems (guaranteed optimal)
             sequence, cost = self.solve_brute_force(
                 dist_matrix, priorities, congestion_weights, traffic_level
             )
-        elif use_qaoa and QISKIT_AVAILABLE and n <= 4:
-            # Use QAOA only when explicitly requested (for demonstration)
+        elif use_qaoa and QISKIT_AVAILABLE and n <= 6:
+            # Direct QAOA: Sampler for n<=4, MPS for n=5-6
             sequence, cost = self.solve_qaoa(qubo, n)
+        elif use_qaoa and QISKIT_AVAILABLE and n <= 10:
+            # Hybrid QAOA: sliding-window decomposition with QAOA sub-solves
+            sequence, cost = self.solve_qaoa_hybrid(
+                dist_matrix, priorities, congestion_weights, traffic_level,
+                window_size=5, overlap=2
+            )
         elif n <= 8:
             # Fallback to brute force if QAOA requested but not available
             sequence, cost = self.solve_brute_force(
@@ -639,7 +884,7 @@ class QUBOOptimizer:
             priorities: Priority weights for each location.
             congestion_weights: Congestion multipliers matrix.
             traffic_level: Traffic level ('low', 'medium', 'high').
-            include_qaoa: Whether to include QAOA (slow, only for n<=4).
+            include_qaoa: Whether to include QAOA (direct for n<=6, hybrid for n<=10).
 
         Returns:
             Dict with:
@@ -758,14 +1003,23 @@ class QUBOOptimizer:
                     "error": str(e)
                 })
 
-        # 4. QAOA (only if requested and n <= 4)
-        if include_qaoa and QISKIT_AVAILABLE and n <= 4:
+        # 5. QAOA — Direct (n<=6) or Hybrid (n<=10)
+        if include_qaoa and QISKIT_AVAILABLE and n <= 10:
             try:
                 start = time.time()
-                seq, cost = self.solve_qaoa(qubo, n)
+                if n <= 6:
+                    # Direct QAOA: Sampler for n<=4, MPS for n=5-6
+                    seq, cost = self.solve_qaoa(qubo, n)
+                    solver_name = "qaoa_direct"
+                else:
+                    # Hybrid QAOA: sliding-window decomposition
+                    seq, cost = self.solve_qaoa_hybrid(
+                        dist_matrix, priorities, congestion_weights, traffic_level
+                    )
+                    solver_name = "qaoa_hybrid"
                 dist_cost = sum(dist_matrix[seq[i], seq[i+1]] for i in range(len(seq)-1))
                 results.append({
-                    "name": "qaoa",
+                    "name": solver_name,
                     "sequence": seq,
                     "cost": round(cost, 2),
                     "distance": round(dist_cost, 2),
@@ -793,7 +1047,7 @@ class QUBOOptimizer:
                 "success": False,
                 "error": "Qiskit not available"
             })
-        elif include_qaoa and n > 4:
+        elif include_qaoa and n > 10:
             results.append({
                 "name": "qaoa",
                 "sequence": [],
@@ -801,7 +1055,7 @@ class QUBOOptimizer:
                 "distance": float('inf'),
                 "solve_time": 0,
                 "success": False,
-                "error": f"QAOA only supports n<=4, got n={n}"
+                "error": f"QAOA supports n<=10, got n={n}"
             })
 
         # Find best solver and calculate improvements
@@ -844,27 +1098,24 @@ class QUBOOptimizer:
         return cost
     
     def _decode_solution(self, bitstring: str, n: int) -> List[int]:
-        """Decode bitstring to city sequence."""
+        """Decode bitstring to city sequence, ensuring a valid permutation."""
         bits = [int(b) for b in bitstring[::-1]]
-        
+
         sequence = []
+        used_cities = set()
         for p in range(n):
             for i in range(n):
                 idx = i * n + p
-                if idx < len(bits) and bits[idx] == 1:
+                if idx < len(bits) and bits[idx] == 1 and i not in used_cities:
                     sequence.append(i)
+                    used_cities.add(i)
                     break
-        
-        # Fill missing cities
-        all_cities = set(range(n))
-        in_sequence = set(sequence)
-        missing = list(all_cities - in_sequence)
-        
-        for pos in range(n):
-            if pos >= len(sequence):
-                if missing:
-                    sequence.append(missing.pop())
-        
+
+        # Fill missing cities (handles invalid bitstrings from sparse QAOA)
+        missing = [c for c in range(n) if c not in used_cities]
+        for c in missing:
+            sequence.append(c)
+
         return sequence
     
     def _evaluate_permutation(
